@@ -1,0 +1,226 @@
+"""Candidate file discovery for the scanner agent."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from fnmatch import fnmatch
+from pathlib import Path
+
+CANDIDATE_PATTERNS = (
+    "*.ipynb",
+    "*model*.py",
+    "*train*.py",
+    "*inference*.py",
+    "*ml*.py",
+    "*ai*.py",
+)
+MODEL_EXTENSIONS = {".onnx", ".pt", ".h5", ".pkl"}
+AI_DIRECTORY_NAMES = {"models", "weights", "checkpoints"}
+MANIFEST_NAMES = {"requirements.txt", "pyproject.toml", "package.json"}
+README_PREFIXES = ("readme",)
+DEPENDENCY_KEYWORDS = {
+    "torch",
+    "tensorflow",
+    "transformers",
+    "scikit-learn",
+    "sklearn",
+    "keras",
+    "xgboost",
+    "langchain",
+    "openai",
+    "anthropic",
+    "google-generativeai",
+    "google-genai",
+    "huggingface",
+    "sentence-transformers",
+    "onnxruntime",
+}
+README_SIGNAL_MAP = {
+    "ai": "README mentions AI capabilities",
+    "machine learning": "README mentions machine learning",
+    "ml": "README mentions ML capabilities",
+    "neural": "README mentions neural networks",
+    "model": "README mentions model behavior",
+    "predict": "README mentions predictive outputs",
+    "classify": "README mentions classification",
+    "score": "README mentions scoring",
+    "recommend": "README mentions recommendation models",
+    "chatbot": "README mentions chatbot behavior",
+    "assistant": "README mentions assistant behavior",
+    "dialogue": "README mentions dialogue systems",
+    "llm": "README mentions LLM behavior",
+}
+SKIP_DIR_NAMES = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+}
+
+
+@dataclass(slots=True)
+class CandidateFile:
+    """Compact file excerpt passed into the scanner model."""
+
+    path: str
+    reason: str
+    excerpt: str
+    signals: list[str]
+
+
+@dataclass(slots=True)
+class RepoInspection:
+    """Candidate inventory produced before the Gemini call."""
+
+    repo_path: str
+    files_inspected: int
+    candidate_files: list[CandidateFile]
+    dependency_signals: list[str]
+    readme_signals: list[str]
+    truncated: bool
+
+
+def _iter_repo_files(repo_root: Path) -> list[Path]:
+    files: list[Path] = []
+    for path in repo_root.rglob("*"):
+        if any(part in SKIP_DIR_NAMES for part in path.parts):
+            continue
+        if path.is_file():
+            files.append(path)
+    return sorted(files)
+
+
+def _read_text_excerpt(path: Path, *, char_limit: int = 1200) -> str:
+    try:
+        if path.suffix.lower() == ".ipynb":
+            payload = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+            cells = payload.get("cells", [])[:3]
+            snippets: list[str] = []
+            for cell in cells:
+                source = "".join(cell.get("source", []))
+                if source.strip():
+                    snippets.append(source.strip())
+            return "\n\n".join(snippets)[:char_limit]
+        return path.read_text(encoding="utf-8", errors="ignore")[:char_limit]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+
+
+def _path_matches_candidate(path: Path) -> tuple[bool, str, int]:
+    relative = path.as_posix()
+    lower_name = path.name.lower()
+    lower_relative = relative.lower()
+
+    if path.suffix.lower() in MODEL_EXTENSIONS:
+        return True, "model_artifact", 100
+    if any(part.lower() in AI_DIRECTORY_NAMES for part in path.parts):
+        return True, "ai_directory", 80
+    if lower_name in MANIFEST_NAMES:
+        return True, "dependency_manifest", 70
+    if lower_name.startswith(README_PREFIXES):
+        return True, "readme", 65
+    for pattern in CANDIDATE_PATTERNS:
+        if fnmatch(lower_name, pattern) or fnmatch(lower_relative, pattern):
+            return True, "code_pattern", 60
+    return False, "", 0
+
+
+def _extract_manifest_signals(path: Path, text: str) -> list[str]:
+    lower_text = text.lower()
+    signals: list[str] = []
+    for dependency in sorted(DEPENDENCY_KEYWORDS):
+        if dependency in lower_text:
+            signals.append(f"dependency signal: {path.name} references {dependency}")
+    return signals
+
+
+def _extract_readme_signals(path: Path, text: str) -> list[str]:
+    lower_text = text.lower()
+    signals: list[str] = []
+    for keyword, message in README_SIGNAL_MAP.items():
+        if keyword in lower_text:
+            signals.append(f"README signal: {path.name} {message.lower()}")
+    return signals
+
+
+def _extract_code_signals(path: Path, text: str) -> list[str]:
+    lower_text = text.lower()
+    signals: list[str] = []
+    for dependency in sorted(DEPENDENCY_KEYWORDS):
+        if f"import {dependency}" in lower_text or f"from {dependency}" in lower_text:
+            signals.append(f"dependency signal: {path.as_posix()} imports {dependency}")
+    if "model" in path.name.lower():
+        signals.append(f"file signal: {path.as_posix()} matched *model*.py")
+    if "train" in path.name.lower():
+        signals.append(f"file signal: {path.as_posix()} matched *train*.py")
+    if "inference" in path.name.lower():
+        signals.append(f"file signal: {path.as_posix()} matched *inference*.py")
+    if any(part.lower() in AI_DIRECTORY_NAMES for part in path.parts):
+        signals.append(f"file signal: {path.as_posix()} is under an AI model directory")
+    return signals
+
+
+def _build_candidate(path: Path, repo_root: Path, reason: str) -> CandidateFile:
+    relative_path = path.relative_to(repo_root).as_posix()
+    excerpt = _read_text_excerpt(path)
+    signals: list[str] = []
+
+    if path.name.lower() in MANIFEST_NAMES:
+        signals.extend(_extract_manifest_signals(path, excerpt))
+    elif path.name.lower().startswith(README_PREFIXES):
+        signals.extend(_extract_readme_signals(path, excerpt))
+    else:
+        signals.extend(_extract_code_signals(path.relative_to(repo_root), excerpt))
+
+    if not signals:
+        signals.append(f"file signal: {relative_path} matched {reason}")
+
+    return CandidateFile(path=relative_path, reason=reason, excerpt=excerpt, signals=signals[:8])
+
+
+def collect_candidate_artifacts(
+    repo_path: str | Path,
+    *,
+    max_files_to_inspect: int = 200,
+) -> RepoInspection:
+    """Inspect a repository and extract a compact shortlist for Gemini."""
+
+    repo_root = Path(repo_path)
+    discovered_files = _iter_repo_files(repo_root)
+    scored_candidates: list[tuple[int, CandidateFile]] = []
+    dependency_signals: list[str] = []
+    readme_signals: list[str] = []
+
+    for path in discovered_files:
+        matched, reason, score = _path_matches_candidate(path.relative_to(repo_root))
+        if not matched:
+            continue
+
+        candidate = _build_candidate(path, repo_root, reason)
+        scored_candidates.append((score, candidate))
+
+        for signal in candidate.signals:
+            if signal.startswith("dependency signal:") and signal not in dependency_signals:
+                dependency_signals.append(signal)
+            if signal.startswith("README signal:") and signal not in readme_signals:
+                readme_signals.append(signal)
+
+    scored_candidates.sort(key=lambda item: (-item[0], item[1].path))
+    truncated = len(scored_candidates) > max_files_to_inspect
+    candidate_files = [candidate for _, candidate in scored_candidates[:max_files_to_inspect]]
+
+    return RepoInspection(
+        repo_path=str(repo_root),
+        files_inspected=len(candidate_files),
+        candidate_files=candidate_files,
+        dependency_signals=dependency_signals[:20],
+        readme_signals=readme_signals[:20],
+        truncated=truncated,
+    )

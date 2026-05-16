@@ -1,118 +1,25 @@
-"""FastAPI entry point for the Conforma-AI D1 backend baseline."""
+"""FastAPI entry point for the Conforma-AI backend."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.config import get_settings
 from app.core.gemini_client import GeminiClientError, call_pro_json
+from app.core.logging import configure_logging
 from app.knowledge.eu_ai_act_minimal import (
     CLASSIFIER_KB_SUMMARY,
     FALLBACK_CLASSIFICATION_RULES,
-    RiskClass,
     deadline_for_classification,
 )
+from app.routers import agents_router
+from app.schemas.agent import ClassifierRequest, ClassifierResponse, HealthResponse
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-
-
-def sanitize_reference_text(value: str) -> str:
-    """Normalize problematic section symbols into ASCII-safe wording."""
-
-    return value.replace("Â§", "Section ").replace("§", "Section ")
-
-
-class HealthResponse(BaseModel):
-    """Health payload returned by the root endpoint."""
-
-    status: Literal["operational"] = "operational"
-    service: str = settings.app_name
-    version: str = settings.app_version
-
-
-class ClassifierRequest(BaseModel):
-    """Input for the D1 Classifier endpoint."""
-
-    system_description: str = Field(
-        ...,
-        min_length=4,
-        max_length=4000,
-        description="Natural-language description of the AI system to classify.",
-    )
-    context_files: list[str] = Field(
-        default_factory=list,
-        description="Optional file paths or snippets for future expansion.",
-    )
-
-    @field_validator("system_description")
-    @classmethod
-    def normalize_description(cls, value: str) -> str:
-        """Strip and validate the incoming description."""
-
-        text = value.strip()
-        if len(text) < 4:
-            raise ValueError("system_description must contain at least 4 characters.")
-        return text
-
-
-class ClassifierResponse(BaseModel):
-    """Normalized classifier output for D1."""
-
-    risk_class: Literal["UNACCEPTABLE", "HIGH_RISK", "LIMITED_RISK", "MINIMAL_RISK"]
-    primary_article: str
-    secondary_articles: list[str] = Field(default_factory=list)
-    reasoning: str
-    deadline: str
-    deadline_iso: str | None = None
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    triggers_article_50: bool
-    mode: Literal["gemini", "fallback"]
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_payload(cls, value: Any) -> Any:
-        """Coerce flexible Gemini payloads into the strict response contract."""
-
-        if not isinstance(value, dict):
-            raise TypeError("Classifier response must be a JSON object.")
-
-        payload = dict(value)
-        risk_class = str(payload.get("risk_class", "")).strip().upper()
-        payload["risk_class"] = risk_class
-
-        payload["primary_article"] = sanitize_reference_text(
-            str(payload.get("primary_article", "")).strip()
-        )
-        secondary_articles = payload.get("secondary_articles", [])
-        if isinstance(secondary_articles, str):
-            secondary_articles = [secondary_articles] if secondary_articles.strip() else []
-        payload["secondary_articles"] = [
-            sanitize_reference_text(str(item).strip()) for item in list(secondary_articles or [])
-        ]
-
-        payload["reasoning"] = sanitize_reference_text(str(payload.get("reasoning", "")).strip())
-        payload["deadline"] = sanitize_reference_text(str(payload.get("deadline", "")).strip())
-
-        confidence = payload.get("confidence", 0.0)
-        try:
-            payload["confidence"] = max(0.0, min(1.0, float(confidence)))
-        except (TypeError, ValueError):
-            payload["confidence"] = 0.0
-
-        payload["triggers_article_50"] = bool(payload.get("triggers_article_50", False))
-        payload["mode"] = payload.get("mode", "gemini")
-
-        deadline_iso = payload.get("deadline_iso")
-        if deadline_iso is not None:
-            payload["deadline_iso"] = str(deadline_iso)
-
-        return payload
 
 
 def build_classifier_prompt(request: ClassifierRequest) -> str:
@@ -228,10 +135,11 @@ async def classify_with_gemini(request: ClassifierRequest) -> ClassifierResponse
 def create_app() -> FastAPI:
     """Create the FastAPI application instance."""
 
+    configure_logging()
     app = FastAPI(
         title="Conforma-AI API",
         version=settings.app_version,
-        description="D1 local baseline for the Conforma-AI Classifier agent.",
+        description="Local backend for the Conforma-AI multi-agent compliance demo.",
     )
 
     app.add_middleware(
@@ -242,11 +150,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.include_router(agents_router)
+
     @app.get("/", response_model=HealthResponse, tags=["health"])
     async def root() -> HealthResponse:
-        """Return the D1 operational health payload."""
+        """Return the operational health payload."""
 
-        return HealthResponse()
+        return HealthResponse(service=settings.app_name, version=settings.app_version)
 
     @app.post(
         "/api/v1/agents/classifier",
