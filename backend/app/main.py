@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.routers import agents_router, audits_router, health_router
+from app.routers import agents_router, artifacts_router, audits_router, health_router
 
 settings = get_settings()
 
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(agents_router)
     app.include_router(audits_router)
+    app.include_router(artifacts_router)
     return app
 
 

@@ -1,26 +1,42 @@
-"""Agent endpoints for Conforma-AI."""
+"""Agent and demo-helper endpoints for Conforma-AI."""
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.classifier import classify_description
+from app.agents.documentation import DocumentationAgent
 from app.agents.scanner import ScannerAgent
-from app.core.exceptions import RepositoryCloneError, ScannerExecutionError, ScannerValidationError
-from app.db.models import Audit
+from app.core.exceptions import (
+    ClassifierExecutionError,
+    DocumentationExecutionError,
+    DocumentationValidationError,
+    RepositoryCloneError,
+    ScannerExecutionError,
+    ScannerValidationError,
+)
+from app.db.models import AISystem, Audit
 from app.db.session import get_db
-from app.schemas.agent import ClassifierRequest, ClassifierResponse, ScannerOutput, ScannerRequest
+from app.schemas.agent import (
+    ClassifierRequest,
+    ClassifierResponse,
+    DemoHighRiskSystemResponse,
+    DocumentationRequest,
+    DocumentationResponse,
+    ScannerOutput,
+    ScannerRequest,
+)
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
+router = APIRouter(tags=["agents"])
 
 
-@router.post("/scanner", response_model=ScannerOutput)
+@router.post("/api/v1/agents/scanner", response_model=ScannerOutput)
 async def scan_repository(
     request: ScannerRequest,
     db: AsyncSession = Depends(get_db),
@@ -69,7 +85,7 @@ async def scan_repository(
         ) from exc
 
 
-@router.post("/classifier", response_model=ClassifierResponse)
+@router.post("/api/v1/agents/classifier", response_model=ClassifierResponse)
 async def classify_system(request: ClassifierRequest) -> ClassifierResponse:
     """Classify a described AI system without creating an audit row."""
 
@@ -77,3 +93,78 @@ async def classify_system(request: ClassifierRequest) -> ClassifierResponse:
         raise HTTPException(status_code=400, detail="system_description is required.")
 
     return await classify_description(request)
+
+
+@router.post("/api/v1/agents/documentation", response_model=DocumentationResponse)
+async def generate_documentation(
+    request: DocumentationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> DocumentationResponse:
+    """Generate structured Annex IV output and a PDF artifact for a high-risk system."""
+
+    agent = DocumentationAgent(db)
+    try:
+        result = await agent.run(request.model_dump(mode="json"), request.audit_id)
+        return DocumentationResponse.model_validate(result)
+    except DocumentationValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except DocumentationExecutionError as exc:
+        logger.exception(
+            "Documentation execution failed for audit %s ai_system %s",
+            request.audit_id,
+            request.ai_system_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Documentation generation failed. Check server logs for details.",
+        ) from exc
+
+
+@router.post("/api/v1/demo/high-risk-system", response_model=DemoHighRiskSystemResponse)
+async def create_demo_high_risk_system(
+    db: AsyncSession = Depends(get_db),
+) -> DemoHighRiskSystemResponse:
+    """Create a demo audit plus one high-risk AI system for Annex IV generation."""
+
+    now = datetime.now(timezone.utc)
+    audit = Audit(
+        source_url="demo://bank-cv-ranking-system",
+        source_type="demo_seed",
+        status="completed",
+        created_at=now,
+        completed_at=now,
+        audit_metadata={
+            "trigger": "demo_high_risk_system",
+            "label": "D4A Annex IV demo seed",
+        },
+    )
+    db.add(audit)
+    await db.commit()
+    await db.refresh(audit)
+
+    ai_system = AISystem(
+        audit_id=audit.id,
+        name="bank_cv_ranking_system",
+        description=(
+            "AI system that ranks CVs for recruitment in a bank using education, employment "
+            "history, skills and interview notes."
+        ),
+        source_files=["src/recruitment/ranker.py", "README.md"],
+        risk_class="HIGH_RISK",
+        primary_article="Annex III Section 4(a)",
+        secondary_articles=[],
+        reasoning=(
+            "This seeded demo system is a recruitment-ranking use case that falls within Annex III "
+            "Section 4(a) on employment and access to self-employment."
+        ),
+        deadline="2 December 2027",
+        deadline_iso=date(2027, 12, 2),
+        confidence=0.99,
+        triggers_article_50=False,
+        created_at=now,
+    )
+    db.add(ai_system)
+    await db.commit()
+    await db.refresh(ai_system)
+
+    return DemoHighRiskSystemResponse(audit_id=audit.id, ai_system_id=ai_system.id)

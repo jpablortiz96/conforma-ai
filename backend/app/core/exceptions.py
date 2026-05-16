@@ -25,3 +25,11 @@ class ClassifierExecutionError(ConformaAIError):
 
 class ClassifierValidationError(ConformaAIError):
     """Raised when classifier inputs or outputs are invalid."""
+
+
+class DocumentationExecutionError(ConformaAIError):
+    """Raised when the Documentation Agent cannot complete a run."""
+
+
+class DocumentationValidationError(ConformaAIError):
+    """Raised when Documentation Agent inputs or outputs are invalid."""

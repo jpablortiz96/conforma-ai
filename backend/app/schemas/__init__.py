@@ -2,9 +2,14 @@
 
 from app.schemas.agent import (
     AISystemCandidate,
+    AnnexIVDocument,
     ClassifierInput,
     ClassifierRequest,
     ClassifierResponse,
+    DemoHighRiskSystemResponse,
+    DocumentationInput,
+    DocumentationRequest,
+    DocumentationResponse,
     HealthResponse,
     RiskClass,
     ScannerInput,
@@ -12,6 +17,7 @@ from app.schemas.agent import (
     ScannerRequest,
     ScannerResponseSystem,
 )
+from app.schemas.artifact import ArtifactSummary, AuditArtifactsResponse
 from app.schemas.audit import (
     AISystemRead,
     AgentRunRead,
@@ -26,15 +32,22 @@ from app.schemas.audit import (
 __all__ = [
     "AISystemCandidate",
     "AISystemRead",
+    "AnnexIVDocument",
     "AgentRunRead",
     "ArtifactRead",
+    "ArtifactSummary",
     "AuditCreateRequest",
+    "AuditArtifactsResponse",
     "AuditRead",
     "AuditResponse",
     "AuditSystemResult",
     "ClassifierInput",
     "ClassifierRequest",
     "ClassifierResponse",
+    "DemoHighRiskSystemResponse",
+    "DocumentationInput",
+    "DocumentationRequest",
+    "DocumentationResponse",
     "GapRead",
     "HealthResponse",
     "RiskClass",

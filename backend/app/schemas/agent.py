@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.schemas.artifact import ArtifactSummary
+
 RiskClass = Literal["UNACCEPTABLE", "HIGH_RISK", "LIMITED_RISK", "MINIMAL_RISK"]
 ResponseMode = Literal["gemini", "fallback"]
 
@@ -198,3 +200,128 @@ class ScannerOutput(BaseModel):
     mode: ResponseMode
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentationRequest(BaseModel):
+    """Public request payload for the Documentation Agent."""
+
+    audit_id: UUID
+    ai_system_id: UUID
+    system_description: str = Field(..., min_length=8, max_length=8000)
+    risk_class: RiskClass
+    primary_article: str = Field(..., min_length=4, max_length=255)
+    source_code_snippets: list[str] = Field(default_factory=list)
+    repo_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("system_description", "primary_article")
+    @classmethod
+    def normalize_documentation_strings(cls, value: str) -> str:
+        """Normalize incoming Documentation Agent text fields."""
+
+        return sanitize_reference_text(" ".join(value.strip().split()))
+
+    @field_validator("source_code_snippets")
+    @classmethod
+    def normalize_source_snippets(cls, value: list[str]) -> list[str]:
+        """Drop blank snippets while preserving ordering."""
+
+        normalized: list[str] = []
+        for item in value:
+            cleaned = " ".join(str(item).strip().split())
+            if cleaned:
+                normalized.append(cleaned)
+        return normalized
+
+
+class DocumentationInput(DocumentationRequest):
+    """Validated internal Documentation Agent input."""
+
+
+class AnnexIVDocument(BaseModel):
+    """Structured Annex IV content generated for a high-risk AI system."""
+
+    system_name: str = Field(..., min_length=3, max_length=255)
+    section_1_general_description: str = Field(..., min_length=20)
+    section_2_intended_purpose: str = Field(..., min_length=20)
+    section_3_human_oversight_measures: str = Field(..., min_length=20)
+    section_4_input_data_specs: str = Field(..., min_length=20)
+    section_5_design_specifications: str = Field(..., min_length=20)
+    section_6_risk_management_system: str = Field(..., min_length=20)
+    section_7_validation_testing: str = Field(..., min_length=20)
+    section_8_performance_metrics: str = Field(..., min_length=20)
+    section_9_post_market_monitoring: str = Field(..., min_length=20)
+    gaps_identified: list[str] = Field(default_factory=list)
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_document_payload(cls, value: Any) -> Any:
+        """Normalize free-form Gemini output into a strict Annex IV document."""
+
+        if not isinstance(value, dict):
+            raise TypeError("Annex IV document must be a JSON object.")
+
+        payload = dict(value)
+        string_fields = [
+            "system_name",
+            "section_1_general_description",
+            "section_2_intended_purpose",
+            "section_3_human_oversight_measures",
+            "section_4_input_data_specs",
+            "section_5_design_specifications",
+            "section_6_risk_management_system",
+            "section_7_validation_testing",
+            "section_8_performance_metrics",
+            "section_9_post_market_monitoring",
+        ]
+        for field_name in string_fields:
+            payload[field_name] = sanitize_reference_text(
+                " ".join(str(payload.get(field_name, "")).strip().split())
+            )
+
+        gaps_identified = payload.get("gaps_identified", [])
+        if isinstance(gaps_identified, str):
+            gaps_identified = [gaps_identified] if gaps_identified.strip() else []
+        payload["gaps_identified"] = [
+            sanitize_reference_text(" ".join(str(item).strip().split()))
+            for item in list(gaps_identified or [])
+            if str(item).strip()
+        ]
+
+        try:
+            payload["confidence"] = max(0.0, min(1.0, float(payload.get("confidence", 0.0))))
+        except (TypeError, ValueError):
+            payload["confidence"] = 0.0
+
+        return payload
+
+
+class DocumentationResponse(BaseModel):
+    """Public response for Documentation Agent runs."""
+
+    audit_id: UUID
+    ai_system_id: UUID
+    required: bool
+    status: Literal["generated", "not_required"]
+    message: str
+    mode: ResponseMode | None = None
+    artifact: ArtifactSummary | None = None
+    system_name: str | None = None
+    section_1_general_description: str | None = None
+    section_2_intended_purpose: str | None = None
+    section_3_human_oversight_measures: str | None = None
+    section_4_input_data_specs: str | None = None
+    section_5_design_specifications: str | None = None
+    section_6_risk_management_system: str | None = None
+    section_7_validation_testing: str | None = None
+    section_8_performance_metrics: str | None = None
+    section_9_post_market_monitoring: str | None = None
+    gaps_identified: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class DemoHighRiskSystemResponse(BaseModel):
+    """Response returned by the D4A demo helper."""
+
+    audit_id: UUID
+    ai_system_id: UUID

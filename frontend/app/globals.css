@@ -3,20 +3,20 @@
 @tailwind utilities;
 
 :root {
-  --background: 214 69% 7%;
+  --background: 214 76% 6%;
   --foreground: 210 40% 97%;
-  --card: 217 53% 13%;
+  --card: 217 54% 12%;
   --card-foreground: 210 40% 97%;
-  --primary: 219 100% 56%;
+  --primary: 217 100% 58%;
   --primary-foreground: 210 40% 98%;
-  --secondary: 216 43% 18%;
+  --secondary: 215 40% 16%;
   --secondary-foreground: 210 40% 96%;
   --muted: 217 36% 14%;
   --muted-foreground: 214 22% 72%;
-  --accent: 205 100% 64%;
+  --accent: 198 100% 64%;
   --accent-foreground: 216 65% 10%;
-  --border: 216 35% 20%;
-  --input: 216 35% 20%;
+  --border: 216 32% 18%;
+  --input: 216 32% 18%;
   --ring: 217 92% 62%;
 }
 
@@ -44,9 +44,20 @@ body {
     BlinkMacSystemFont,
     sans-serif;
   background-image:
-    radial-gradient(circle at top, rgba(31, 102, 255, 0.16), transparent 36%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.03), transparent 24%),
-    linear-gradient(180deg, #071427 0%, #08142a 50%, #040a14 100%);
+    radial-gradient(circle at top, rgba(37, 99, 235, 0.18), transparent 30%),
+    radial-gradient(circle at 80% 10%, rgba(14, 165, 233, 0.1), transparent 24%),
+    linear-gradient(180deg, #04111f 0%, #07162a 48%, #04101a 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.03), transparent 22%),
+    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.03), transparent 20%);
+  opacity: 0.6;
 }
 
 code,
@@ -62,6 +73,118 @@ pre,
 }
 
 ::selection {
-  background: rgba(31, 102, 255, 0.32);
+  background: rgba(56, 189, 248, 0.28);
   color: #f8fbff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.25);
+  border: 2px solid rgba(2, 6, 23, 0.4);
+}
+
+@keyframes cockpit-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(56, 189, 248, 0.12),
+      0 0 0 rgba(14, 165, 233, 0);
+    filter: saturate(0.95);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(56, 189, 248, 0.24),
+      0 18px 44px rgba(14, 165, 233, 0.16);
+    filter: saturate(1.08);
+  }
+}
+
+@keyframes progress-sweep {
+  0% {
+    transform: translateX(-140%);
+  }
+
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+@keyframes live-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes fade-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@layer components {
+  .panel-shell {
+    @apply relative rounded-[32px] border border-white/10 bg-white/[0.045] p-6 shadow-[0_28px_90px_rgba(1,8,20,0.46)] backdrop-blur xl:p-7;
+  }
+
+  .progress-shell {
+    @apply relative overflow-hidden bg-[linear-gradient(90deg,rgba(56,189,248,0.94)_0%,rgba(37,99,235,0.94)_52%,rgba(14,165,233,0.98)_100%)];
+  }
+
+  .progress-shell::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.16) 35%,
+      rgba(255, 255, 255, 0.3) 50%,
+      rgba(255, 255, 255, 0.12) 65%,
+      transparent 100%
+    );
+    animation: progress-sweep 1.8s linear infinite;
+  }
+
+  .cockpit-pulse {
+    animation: cockpit-pulse 1.9s ease-in-out infinite;
+  }
+
+  .agent-card-live {
+    animation: cockpit-pulse 2.2s ease-in-out infinite;
+    box-shadow:
+      0 0 0 1px rgba(56, 189, 248, 0.15),
+      0 18px 50px rgba(14, 165, 233, 0.12);
+  }
+
+  .live-dot {
+    animation: live-dot-pulse 1.5s ease-in-out infinite;
+    box-shadow: 0 0 18px rgba(125, 211, 252, 0.6);
+  }
+
+  .fade-rise {
+    animation: fade-rise 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
