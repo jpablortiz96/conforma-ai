@@ -73,13 +73,13 @@ FALLBACK_CLASSIFICATION_RULES: tuple[ClassificationRule, ...] = (
     ClassificationRule(
         name="employment_recruitment",
         risk_class="HIGH_RISK",
-        primary_article="Annex III §4(a)",
+        primary_article="Annex III Section 4(a)",
         secondary_articles=(),
         confidence=0.93,
         triggers_article_50=False,
         reasoning=(
             "CV ranking and candidate filtering in recruitment fall under Annex III "
-            "§4(a) on employment and access to self-employment. The applicable Annex III "
+            "Section 4(a) on employment and access to self-employment. The applicable Annex III "
             "deadline is 2 December 2027, postponed from 2 August 2026 by the Digital "
             "Omnibus deal of 7 May 2026."
         ),
@@ -95,12 +95,12 @@ FALLBACK_CLASSIFICATION_RULES: tuple[ClassificationRule, ...] = (
     ClassificationRule(
         name="creditworthiness",
         risk_class="HIGH_RISK",
-        primary_article="Annex III §5(b)",
+        primary_article="Annex III Section 5(b)",
         secondary_articles=(),
         confidence=0.91,
         triggers_article_50=False,
         reasoning=(
-            "Creditworthiness and credit scoring are listed in Annex III §5(b) as "
+            "Creditworthiness and credit scoring are listed in Annex III Section 5(b) as "
             "high-risk systems affecting access to essential private services. The "
             "Annex III deadline is 2 December 2027 after the 7 May 2026 Omnibus extension."
         ),
@@ -109,13 +109,13 @@ FALLBACK_CLASSIFICATION_RULES: tuple[ClassificationRule, ...] = (
     ClassificationRule(
         name="retail_biometric_security",
         risk_class="HIGH_RISK",
-        primary_article="Annex III §1",
+        primary_article="Annex III Section 1",
         secondary_articles=(),
         confidence=0.82,
         triggers_article_50=False,
         reasoning=(
             "Facial recognition used to identify suspected shoplifters is a biometric "
-            "identification use case that fits Annex III §1. Based on the description "
+            "identification use case that fits Annex III Section 1. Based on the description "
             "it is not clearly the prohibited law-enforcement scenario of Article 5(1)(h), "
             "so the conservative D1 classification is high-risk."
         ),
@@ -188,9 +188,9 @@ Conforma-AI D1 minimal EU AI Act knowledge base:
 - MINIMAL_RISK: no mandatory obligation tier under the Act.
 
 Important examples:
-- Recruitment, CV ranking, resume scoring -> Annex III §4(a)
-- Creditworthiness scoring -> Annex III §5(b)
-- Biometric identification and categorization -> Annex III §1
+- Recruitment, CV ranking, resume scoring -> Annex III Section 4(a)
+- Creditworthiness scoring -> Annex III Section 5(b)
+- Biometric identification and categorization -> Annex III Section 1
 - Chatbots interacting with people -> Article 50(1)
 - Synthetic/deep fake content -> Article 50(2)/(4)
 - Spam filters -> minimal risk

@@ -1,21 +1,7 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Manrope } from "next/font/google";
 import type { ReactNode } from "react";
 
 import "./globals.css";
-
-const manrope = Manrope({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  display: "swap"
-});
-
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-  display: "swap",
-  weight: ["400", "500", "600"]
-});
 
 export const metadata: Metadata = {
   title: "Conforma-AI | D1 Classifier Baseline",
@@ -29,8 +15,8 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${manrope.variable} ${plexMono.variable} bg-background font-sans text-foreground`}>
+    <html lang="en" suppressHydrationWarning>
+      <body className="bg-background font-sans text-foreground antialiased">
         {children}
       </body>
     </html>

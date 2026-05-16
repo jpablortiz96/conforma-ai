@@ -25,14 +25,24 @@
 }
 
 html {
+  min-height: 100%;
   scroll-behavior: smooth;
 }
 
+html,
 body {
   min-height: 100vh;
+  margin: 0;
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: var(--font-sans), "Segoe UI", sans-serif;
+  font-family:
+    "Segoe UI",
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
   background-image:
     radial-gradient(circle at top, rgba(31, 102, 255, 0.16), transparent 36%),
     linear-gradient(135deg, rgba(255, 255, 255, 0.03), transparent 24%),
@@ -42,7 +52,13 @@ body {
 code,
 pre,
 .font-mono {
-  font-family: var(--font-mono), "IBM Plex Mono", monospace;
+  font-family:
+    "IBM Plex Mono",
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    Menlo,
+    monospace;
 }
 
 ::selection {

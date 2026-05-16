@@ -49,7 +49,11 @@ export default function HomePage() {
         setHealth(payload);
         setBackendError(null);
       } catch (error) {
-        setBackendError(error instanceof Error ? error.message : "Backend unavailable.");
+        setBackendError(
+          error instanceof Error
+            ? error.message
+            : "The backend is unavailable. Start the API at http://localhost:8000 and refresh."
+        );
       }
     })();
   }, []);
@@ -61,8 +65,14 @@ export default function HomePage() {
         try {
           const payload = await classifySystem({ system_description: description });
           setResult(payload);
+          setBackendError(null);
         } catch (error) {
-          setRequestError(error instanceof Error ? error.message : "Classification failed.");
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Classification failed. Verify that http://localhost:8000 is available.";
+          setRequestError(message);
+          setResult(null);
         }
       })();
     });
@@ -78,13 +88,18 @@ export default function HomePage() {
                 <Shield className="h-3.5 w-3.5" />
                 AI Agent Olympics · D1 Local Baseline
               </div>
-              <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-conforma-white md:text-6xl">
+              <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-200">
+                Conforma-AI
+              </p>
+              <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-slate-50 md:text-6xl">
                 EU AI Act classification with a six-agent roadmap behind it.
               </h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
-                Conforma-AI is building an enterprise compliance operating system for the EU AI Act.
-                D1 runs the Classifier agent locally, while the UI already frames the full six-agent
-                workflow planned through D5.
+              <p className="mt-4 max-w-2xl text-lg font-medium text-slate-100 md:text-xl">
+                Autonomous compliance for enterprise AI systems under the EU AI Act.
+              </p>
+              <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
+                D1 runs the Classifier agent locally, while the interface already shows the full
+                six-agent Conforma-AI vision planned through D5.
               </p>
             </div>
 
@@ -126,7 +141,7 @@ export default function HomePage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-medium uppercase tracking-[0.18em] text-sky-200">Classifier Demo</p>
-                <h2 className="mt-2 text-2xl font-semibold text-conforma-white">Run the D1 smoke path</h2>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-50">Run the D1 smoke path</h2>
               </div>
               <Sparkles className="h-6 w-6 text-sky-300" />
             </div>
@@ -161,7 +176,7 @@ export default function HomePage() {
                 type="button"
                 onClick={submit}
                 disabled={isPending}
-                className="inline-flex items-center gap-2 rounded-full bg-conforma-blue px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isPending ? "Classifying..." : "Classify system"}
                 <ArrowRight className="h-4 w-4" />
@@ -178,8 +193,8 @@ export default function HomePage() {
             ) : null}
 
             {backendError ? (
-              <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                Backend health check failed: {backendError}
+              <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-100">
+                Backend connection issue: {backendError}
               </div>
             ) : null}
           </article>
@@ -235,6 +250,10 @@ export default function HomePage() {
                     <dd className="mt-1 text-slate-100">{result.triggers_article_50 ? "Yes" : "No"}</dd>
                   </div>
                   <div>
+                    <dt className="text-slate-400">Mode</dt>
+                    <dd className="mt-1 font-mono text-slate-100">{result.mode}</dd>
+                  </div>
+                  <div>
                     <dt className="text-slate-400">Reasoning</dt>
                     <dd className="mt-1 leading-7 text-slate-200">{result.reasoning}</dd>
                   </div>
@@ -248,7 +267,7 @@ export default function HomePage() {
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-sm font-medium uppercase tracking-[0.18em] text-sky-200">Six-agent vision</p>
-              <h2 className="mt-2 text-2xl font-semibold text-conforma-white">The product direction stays multi-agent</h2>
+              <h2 className="mt-2 text-2xl font-semibold text-slate-50">The product direction stays multi-agent</h2>
             </div>
             <p className="max-w-xl text-sm leading-6 text-slate-400">
               D1 only runs the Classifier end-to-end, but the architecture and presentation stay aligned with the six-agent compliance workflow required by the handoff.
@@ -262,7 +281,7 @@ export default function HomePage() {
                 className="rounded-3xl border border-white/10 bg-slate-950/35 p-5 transition hover:border-sky-400/30 hover:bg-slate-950/55"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-lg font-semibold text-conforma-white">{agent.name}</h3>
+                  <h3 className="text-lg font-semibold text-slate-50">{agent.name}</h3>
                   <span
                     className={`rounded-full px-3 py-1 text-xs font-semibold ${
                       agent.status === "Live in D1"

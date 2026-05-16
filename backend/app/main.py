@@ -22,6 +22,12 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def sanitize_reference_text(value: str) -> str:
+    """Normalize problematic section symbols into ASCII-safe wording."""
+
+    return value.replace("Â§", "Section ").replace("§", "Section ")
+
+
 class HealthResponse(BaseModel):
     """Health payload returned by the root endpoint."""
 
@@ -80,10 +86,18 @@ class ClassifierResponse(BaseModel):
         risk_class = str(payload.get("risk_class", "")).strip().upper()
         payload["risk_class"] = risk_class
 
+        payload["primary_article"] = sanitize_reference_text(
+            str(payload.get("primary_article", "")).strip()
+        )
         secondary_articles = payload.get("secondary_articles", [])
         if isinstance(secondary_articles, str):
             secondary_articles = [secondary_articles] if secondary_articles.strip() else []
-        payload["secondary_articles"] = list(secondary_articles or [])
+        payload["secondary_articles"] = [
+            sanitize_reference_text(str(item).strip()) for item in list(secondary_articles or [])
+        ]
+
+        payload["reasoning"] = sanitize_reference_text(str(payload.get("reasoning", "")).strip())
+        payload["deadline"] = sanitize_reference_text(str(payload.get("deadline", "")).strip())
 
         confidence = payload.get("confidence", 0.0)
         try:
@@ -116,6 +130,7 @@ Rules:
 - Use one risk class: UNACCEPTABLE, HIGH_RISK, LIMITED_RISK, MINIMAL_RISK.
 - If uncertain, choose the more conservative class and lower confidence.
 - Mention the Digital Omnibus deal of 7 May 2026 when explaining Annex III deadlines.
+- Use the word "Section" instead of the section symbol.
 - `primary_article` must name the most relevant Article or Annex paragraph when one exists.
 - `secondary_articles` must be a JSON list.
 - `deadline_iso` must be either YYYY-MM-DD or null.
