@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: conforma-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: conforma_ai
+      POSTGRES_USER: conforma
+      POSTGRES_PASSWORD: conforma_dev_password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conforma -d conforma_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: conforma-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
