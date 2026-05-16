@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, Text, Uuid, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Text, Uuid, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -64,9 +64,12 @@ class AISystem(Base):
     source_files: Mapped[list[str] | None] = mapped_column(text_list_type, nullable=True)
     risk_class: Mapped[str | None] = mapped_column(Text, nullable=True)
     primary_article: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secondary_articles: Mapped[list[str] | None] = mapped_column(text_list_type, nullable=True)
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     deadline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deadline_iso: Mapped[date | None] = mapped_column(Date, nullable=True)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
+    triggers_article_50: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=func.now()
     )

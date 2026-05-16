@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+RiskClass = Literal["UNACCEPTABLE", "HIGH_RISK", "LIMITED_RISK", "MINIMAL_RISK"]
+ResponseMode = Literal["gemini", "fallback"]
+
 
 def sanitize_reference_text(value: str) -> str:
     """Normalize problematic section symbols into ASCII-safe wording."""
 
-    return value.replace("Ã‚Â§", "Section ").replace("Â§", "Section ").replace("§", "Section ")
+    return (
+        value.replace("Ãƒâ€šÃ‚Â§", "Section ")
+        .replace("Ã‚Â§", "Section ")
+        .replace("Â§", "Section ")
+        .replace("§", "Section ")
+    )
 
 
 class HealthResponse(BaseModel):
@@ -23,7 +32,7 @@ class HealthResponse(BaseModel):
 
 
 class ClassifierRequest(BaseModel):
-    """Input for the D1 classifier endpoint."""
+    """Public input for the D1-compatible classifier endpoint."""
 
     system_description: str = Field(
         ...,
@@ -47,18 +56,34 @@ class ClassifierRequest(BaseModel):
         return text
 
 
-class ClassifierResponse(BaseModel):
-    """Normalized classifier output for D1."""
+class ClassifierInput(BaseModel):
+    """Validated internal input for the classifier agent."""
 
-    risk_class: Literal["UNACCEPTABLE", "HIGH_RISK", "LIMITED_RISK", "MINIMAL_RISK"]
+    audit_id: UUID
+    ai_system_id: UUID
+    system_description: str = Field(..., min_length=4, max_length=4000)
+    context_files: list[str] = Field(default_factory=list)
+
+    @field_validator("system_description")
+    @classmethod
+    def normalize_internal_description(cls, value: str) -> str:
+        """Normalize internal descriptions before classification."""
+
+        return " ".join(value.strip().split())
+
+
+class ClassifierResponse(BaseModel):
+    """Normalized classifier output for D1 and D3."""
+
+    risk_class: RiskClass
     primary_article: str
     secondary_articles: list[str] = Field(default_factory=list)
     reasoning: str
     deadline: str
-    deadline_iso: str | None = None
+    deadline_iso: date | None = None
     confidence: float = Field(..., ge=0.0, le=1.0)
     triggers_article_50: bool
-    mode: Literal["gemini", "fallback"]
+    mode: ResponseMode
 
     @model_validator(mode="before")
     @classmethod
@@ -90,8 +115,6 @@ class ClassifierResponse(BaseModel):
 
         payload["triggers_article_50"] = bool(payload.get("triggers_article_50", False))
         payload["mode"] = payload.get("mode", "gemini")
-        deadline_iso = payload.get("deadline_iso")
-        payload["deadline_iso"] = str(deadline_iso) if deadline_iso is not None else None
         return payload
 
 
@@ -131,7 +154,9 @@ class AISystemCandidate(BaseModel):
     def normalize_name(cls, value: str) -> str:
         """Normalize AI system names into a compact identifier."""
 
-        normalized = "_".join(part for part in value.strip().lower().replace("-", "_").split("_") if part)
+        normalized = "_".join(
+            part for part in value.strip().lower().replace("-", "_").split("_") if part
+        )
         return normalized or "ai_system_candidate"
 
     @field_validator("source_files", "detection_signals")
@@ -170,6 +195,6 @@ class ScannerOutput(BaseModel):
     files_inspected: int
     ai_systems_found: list[ScannerResponseSystem] = Field(default_factory=list)
     summary: str
-    mode: Literal["gemini", "fallback"]
+    mode: ResponseMode
 
     model_config = ConfigDict(from_attributes=True)

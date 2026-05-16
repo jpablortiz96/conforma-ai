@@ -1,13 +1,15 @@
-"""Audit persistence schemas."""
+"""Audit persistence and API schemas."""
 
 from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+
+from app.schemas.agent import RiskClass
 
 
 class AuditRead(BaseModel):
@@ -37,9 +39,12 @@ class AISystemRead(BaseModel):
     source_files: list[str] | None = None
     risk_class: str | None = None
     primary_article: str | None = None
+    secondary_articles: list[str] | None = None
     reasoning: str | None = None
     deadline: str | None = None
+    deadline_iso: date | None = None
     confidence: Decimal | None = None
+    triggers_article_50: bool | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -94,3 +99,39 @@ class GapRead(BaseModel):
     deadline: date | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AuditCreateRequest(BaseModel):
+    """Public request payload for the synchronous D3 audit flow."""
+
+    repo_url: AnyHttpUrl
+    max_files_to_inspect: int = Field(default=200, ge=1, le=500)
+
+
+class AuditSystemResult(BaseModel):
+    """Combined scanner and classifier view returned by the audit console."""
+
+    id: UUID
+    name: str
+    description: str
+    source_files: list[str] = Field(default_factory=list)
+    detection_signals: list[str] = Field(default_factory=list)
+    risk_class: RiskClass
+    primary_article: str
+    secondary_articles: list[str] = Field(default_factory=list)
+    reasoning: str
+    deadline: str
+    deadline_iso: date | None = None
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    triggers_article_50: bool
+
+
+class AuditResponse(BaseModel):
+    """Synchronous audit response for D3."""
+
+    audit_id: UUID
+    repo_url: str
+    status: Literal["completed"]
+    systems: list[AuditSystemResult] = Field(default_factory=list)
+    portfolio_risk_index: int = Field(..., ge=0, le=100)
+    summary: str

@@ -17,3 +17,11 @@ class ScannerExecutionError(ConformaAIError):
 
 class ScannerValidationError(ConformaAIError):
     """Raised when scanner inputs or outputs are invalid."""
+
+
+class ClassifierExecutionError(ConformaAIError):
+    """Raised when the classifier cannot complete a run."""
+
+
+class ClassifierValidationError(ConformaAIError):
+    """Raised when classifier inputs or outputs are invalid."""

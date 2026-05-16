@@ -8,11 +8,12 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.classifier import classify_description
 from app.agents.scanner import ScannerAgent
 from app.core.exceptions import RepositoryCloneError, ScannerExecutionError, ScannerValidationError
 from app.db.models import Audit
 from app.db.session import get_db
-from app.schemas.agent import ScannerOutput, ScannerRequest
+from app.schemas.agent import ClassifierRequest, ClassifierResponse, ScannerOutput, ScannerRequest
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +50,13 @@ async def scan_repository(
         audit.completed_at = datetime.now(timezone.utc)
         db.add(audit)
         await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ScannerValidationError as exc:
         audit.status = "failed"
         audit.completed_at = datetime.now(timezone.utc)
         db.add(audit)
         await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ScannerExecutionError as exc:
         logger.exception("Scanner execution failed for audit %s", audit.id)
         audit.status = "failed"
@@ -72,3 +67,13 @@ async def scan_repository(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Scanner execution failed. Check server logs for details.",
         ) from exc
+
+
+@router.post("/classifier", response_model=ClassifierResponse)
+async def classify_system(request: ClassifierRequest) -> ClassifierResponse:
+    """Classify a described AI system without creating an audit row."""
+
+    if not request.system_description:
+        raise HTTPException(status_code=400, detail="system_description is required.")
+
+    return await classify_description(request)
