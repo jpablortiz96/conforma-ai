@@ -13,6 +13,7 @@ from app.schemas.artifact import ArtifactSummary
 
 RiskClass = Literal["UNACCEPTABLE", "HIGH_RISK", "LIMITED_RISK", "MINIMAL_RISK"]
 ResponseMode = Literal["gemini", "fallback"]
+GapSeverity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 
 ISO_DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 NULLISH_DEADLINE_VALUES = {
@@ -369,6 +370,135 @@ class DocumentationResponse(BaseModel):
     section_9_post_market_monitoring: str | None = None
     gaps_identified: list[str] = Field(default_factory=list)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class DisclosureRequest(BaseModel):
+    """Public request payload for the Disclosure Agent."""
+
+    audit_id: UUID
+    ai_system_id: UUID
+    system_name: str = Field(..., min_length=3, max_length=255)
+    description: str = Field(..., min_length=8, max_length=4000)
+    risk_class: RiskClass
+    primary_article: str = Field(..., min_length=4, max_length=255)
+    triggers_article_50: bool
+    secondary_articles: list[str] = Field(default_factory=list)
+
+    @field_validator("system_name", "description", "primary_article")
+    @classmethod
+    def normalize_disclosure_strings(cls, value: str) -> str:
+        """Normalize Disclosure Agent string inputs."""
+
+        return sanitize_reference_text(" ".join(value.strip().split()))
+
+    @field_validator("secondary_articles")
+    @classmethod
+    def normalize_secondary_articles(cls, value: list[str]) -> list[str]:
+        """Normalize optional secondary articles."""
+
+        return [
+            sanitize_reference_text(" ".join(str(item).strip().split()))
+            for item in value
+            if str(item).strip()
+        ]
+
+
+class DisclosureInput(DisclosureRequest):
+    """Validated internal Disclosure Agent input."""
+
+
+class DisclosureNotices(BaseModel):
+    """Multilingual disclosure notices."""
+
+    en: str
+    it: str
+    es: str
+    fr: str
+    de: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_notice_payload(cls, value: Any) -> Any:
+        """Normalize multilingual notice payloads."""
+
+        if not isinstance(value, dict):
+            raise TypeError("Disclosure notices must be an object keyed by language code.")
+        return {
+            key: sanitize_reference_text(" ".join(str(value.get(key, "")).strip().split()))
+            for key in ("en", "it", "es", "fr", "de")
+        }
+
+
+class DisclosureResponse(BaseModel):
+    """Public response returned by the Disclosure Agent."""
+
+    audit_id: UUID
+    ai_system_id: UUID
+    requires_disclosure: bool
+    article: str | None = None
+    notices: DisclosureNotices | None = None
+    placement_recommendations: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    mode: ResponseMode | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_disclosure_payload(cls, value: Any) -> Any:
+        """Sanitize disclosure response fields."""
+
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        article = payload.get("article")
+        payload["article"] = sanitize_reference_text(str(article).strip()) if article else None
+        payload["placement_recommendations"] = [
+            sanitize_reference_text(" ".join(str(item).strip().split()))
+            for item in list(payload.get("placement_recommendations", []) or [])
+            if str(item).strip()
+        ]
+        return payload
+
+
+class GapAuditorGap(BaseModel):
+    """Gap item returned by the Gap Auditor."""
+
+    severity: GapSeverity
+    title: str = Field(..., min_length=3, max_length=255)
+    description: str = Field(..., min_length=8, max_length=4000)
+    affected_system_id: UUID | None = None
+    recommended_action: str = Field(..., min_length=8, max_length=2000)
+    legal_reference: str = Field(..., min_length=3, max_length=255)
+
+    @field_validator("title", "description", "recommended_action", "legal_reference")
+    @classmethod
+    def normalize_gap_strings(cls, value: str) -> str:
+        """Normalize gap text fields."""
+
+        return sanitize_reference_text(" ".join(value.strip().split()))
+
+
+class GapAuditorRequest(BaseModel):
+    """Public request payload for the Gap Auditor."""
+
+    audit_id: UUID
+    systems: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    disclosures: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GapAuditorInput(GapAuditorRequest):
+    """Validated internal Gap Auditor input."""
+
+
+class GapAuditorResponse(BaseModel):
+    """Public response returned by the Gap Auditor."""
+
+    compliance_score: int = Field(..., ge=0, le=100)
+    estimated_fine_exposure_eur: int = Field(..., ge=0)
+    time_to_compliant_days: int = Field(..., ge=0)
+    gaps: list[GapAuditorGap] = Field(default_factory=list)
+    summary: str
+    priority_actions: list[str] = Field(default_factory=list)
 
 
 class DemoHighRiskSystemResponse(BaseModel):

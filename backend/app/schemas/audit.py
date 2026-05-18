@@ -9,7 +9,13 @@ from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
-from app.schemas.agent import RiskClass, normalize_deadline_iso_value, sanitize_reference_text
+from app.schemas.agent import (
+    DisclosureResponse,
+    GapAuditorGap,
+    RiskClass,
+    normalize_deadline_iso_value,
+    sanitize_reference_text,
+)
 
 
 class AuditRead(BaseModel):
@@ -158,4 +164,20 @@ class AuditResponse(BaseModel):
     status: Literal["completed"]
     systems: list[AuditSystemResult] = Field(default_factory=list)
     portfolio_risk_index: int = Field(..., ge=0, le=100)
+    summary: str
+
+
+class CompliancePackResponse(BaseModel):
+    """Response returned by the D4B compliance-pack endpoint."""
+
+    audit_id: UUID
+    compliance_score: int = Field(..., ge=0, le=100)
+    estimated_fine_exposure_eur: int = Field(..., ge=0)
+    time_to_compliant_days: int = Field(..., ge=0)
+    systems_count: int = Field(..., ge=0)
+    high_risk_count: int = Field(..., ge=0)
+    article_50_count: int = Field(..., ge=0)
+    gaps: list[GapAuditorGap] = Field(default_factory=list)
+    disclosures: list[DisclosureResponse] = Field(default_factory=list)
+    priority_actions: list[str] = Field(default_factory=list)
     summary: str

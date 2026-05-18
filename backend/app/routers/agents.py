@@ -11,11 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.classifier import classify_description
 from app.agents.documentation import DocumentationAgent
+from app.agents.disclosure import DisclosureAgent
+from app.agents.gap_auditor import GapAuditorAgent
 from app.agents.scanner import ScannerAgent
 from app.core.exceptions import (
     ClassifierExecutionError,
+    DisclosureExecutionError,
+    DisclosureValidationError,
     DocumentationExecutionError,
     DocumentationValidationError,
+    GapAuditorExecutionError,
+    GapAuditorValidationError,
     RepositoryCloneError,
     ScannerExecutionError,
     ScannerValidationError,
@@ -26,8 +32,12 @@ from app.schemas.agent import (
     ClassifierRequest,
     ClassifierResponse,
     DemoHighRiskSystemResponse,
+    DisclosureRequest,
+    DisclosureResponse,
     DocumentationRequest,
     DocumentationResponse,
+    GapAuditorRequest,
+    GapAuditorResponse,
     ScannerOutput,
     ScannerRequest,
 )
@@ -129,6 +139,52 @@ async def generate_documentation(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Documentation generation failed. Check server logs for details.",
+        ) from exc
+
+
+@router.post("/api/v1/agents/disclosure", response_model=DisclosureResponse)
+async def generate_disclosure(
+    request: DisclosureRequest,
+    db: AsyncSession = Depends(get_db),
+) -> DisclosureResponse:
+    """Generate Article 50 disclosure notices for one AI system."""
+
+    agent = DisclosureAgent(db)
+    try:
+        result = await agent.run(request.model_dump(mode="json"), request.audit_id)
+        return DisclosureResponse.model_validate(result)
+    except DisclosureValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except DisclosureExecutionError as exc:
+        logger.exception(
+            "Disclosure execution failed for audit %s ai_system %s",
+            request.audit_id,
+            request.ai_system_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Disclosure generation failed. Check server logs for details.",
+        ) from exc
+
+
+@router.post("/api/v1/agents/gap-auditor", response_model=GapAuditorResponse)
+async def run_gap_auditor(
+    request: GapAuditorRequest,
+    db: AsyncSession = Depends(get_db),
+) -> GapAuditorResponse:
+    """Compute deterministic compliance gaps and score for an audit payload."""
+
+    agent = GapAuditorAgent(db)
+    try:
+        result = await agent.run(request.model_dump(mode="json"), request.audit_id)
+        return GapAuditorResponse.model_validate(result)
+    except GapAuditorValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except GapAuditorExecutionError as exc:
+        logger.exception("Gap Auditor execution failed for audit %s", request.audit_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Gap Auditor execution failed. Check server logs for details.",
         ) from exc
 
 

@@ -77,6 +77,19 @@ RECRUITMENT_DECISION_NEGATION_TOKENS = (
     "not for real hiring decisions",
     "for educational purposes only",
 )
+GENERATIVE_CONTENT_TOKENS = (
+    "language model",
+    "text generation",
+    "text generator",
+    "generation logic",
+    "gpt",
+    "synthetic text",
+    "image generator",
+    "video generator",
+    "generative",
+)
+WEAK_GENERATIVE_TOKENS = ("llm",)
+GENERATIVE_SUPPORT_TOKENS = ("generate", "generation", "inference", "model weights", "synthetic", "gpt")
 
 ANNEX_I_PRODUCT_TOKENS = (
     "medical device",
@@ -123,6 +136,17 @@ def _is_tutorial_only_recruitment_example(normalized: str) -> bool:
     )
 
 
+def _is_generative_content_use(normalized: str) -> bool:
+    """Detect generative systems without over-weighting repo names alone."""
+
+    if _contains_any(normalized, GENERATIVE_CONTENT_TOKENS):
+        return True
+    return _contains_any(normalized, WEAK_GENERATIVE_TOKENS) and _contains_any(
+        normalized,
+        GENERATIVE_SUPPORT_TOKENS,
+    )
+
+
 def _force_high_risk_outcome(
     response: ClassifierResponse,
     *,
@@ -146,8 +170,7 @@ def _force_high_risk_outcome(
     response.deadline_iso = deadline_iso
     if response.confidence < 0.9:
         response.confidence = 0.9
-    if reasoning not in response.reasoning:
-        response.reasoning = f"{reasoning} {response.reasoning}".strip()
+    response.reasoning = reasoning.strip()
     return response
 
 
@@ -236,6 +259,23 @@ def _ensure_article(
             ),
             triggers_article_50=False,
         )
+    elif _is_generative_content_use(normalized) and response.risk_class == "MINIMAL_RISK":
+        response.risk_class = "LIMITED_RISK"
+        response.primary_article = "Article 50(2)"
+        response.secondary_articles = []
+        response.triggers_article_50 = True
+        response.confidence = max(response.confidence, 0.82)
+        deadline, deadline_iso = deadline_for_classification(
+            "LIMITED_RISK",
+            triggers_article_50=True,
+            primary_article=response.primary_article,
+        )
+        response.deadline = deadline
+        response.deadline_iso = deadline_iso
+        response.reasoning = (
+            "Deterministic guardrail: the combined evidence describes a language model or other generative system "
+            "that can produce synthetic text or related content, which triggers Article 50(2)."
+        ).strip()
     elif response.risk_class == "HIGH_RISK":
         if any(token in normalized for token in ("facial recognition", "face recognition", "shoplifter", "supermarket", "retail")):
             response.primary_article = "Annex III Section 1"

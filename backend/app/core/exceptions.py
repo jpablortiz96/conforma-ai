@@ -33,3 +33,19 @@ class DocumentationExecutionError(ConformaAIError):
 
 class DocumentationValidationError(ConformaAIError):
     """Raised when Documentation Agent inputs or outputs are invalid."""
+
+
+class DisclosureExecutionError(ConformaAIError):
+    """Raised when the Disclosure Agent cannot complete a run."""
+
+
+class DisclosureValidationError(ConformaAIError):
+    """Raised when Disclosure Agent inputs or outputs are invalid."""
+
+
+class GapAuditorExecutionError(ConformaAIError):
+    """Raised when the Gap Auditor cannot complete a run."""
+
+
+class GapAuditorValidationError(ConformaAIError):
+    """Raised when Gap Auditor inputs or outputs are invalid."""

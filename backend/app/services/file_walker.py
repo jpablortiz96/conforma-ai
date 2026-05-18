@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
+import re
 
 CANDIDATE_PATTERNS = (
     "*.ipynb",
@@ -57,6 +58,24 @@ DOMAIN_KEYWORD_GROUPS = (
     (("candidate", "applicant"), "candidate or applicant evaluation"),
     (("screening",), "screening workflows"),
 )
+RECRUITMENT_STRONG_CONTEXT_KEYWORDS = (
+    "recruitment",
+    "hiring",
+    "candidate",
+    "applicant",
+    "job matching",
+    "talent acquisition",
+    "employment",
+)
+RECRUITMENT_EXPLICIT_PHRASES = (
+    "resume screening",
+    "cv screening",
+    "candidate ranking",
+    "applicant screening",
+    "recruitment screening",
+    "resume scoring",
+    "resume ranking",
+)
 SKIP_DIR_NAMES = {
     ".git",
     ".venv",
@@ -69,6 +88,14 @@ SKIP_DIR_NAMES = {
     "build",
     ".next",
 }
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    normalized_keyword = keyword.lower().replace("-", " ").strip()
+    if not normalized_keyword:
+        return False
+    pattern = r"\b" + r"\s+".join(re.escape(part) for part in normalized_keyword.split()) + r"\b"
+    return re.search(pattern, text) is not None
 
 
 @dataclass(slots=True)
@@ -162,7 +189,19 @@ def _extract_domain_signals(source_label: str, text: str, *, verb: str) -> list[
     normalized_text = text.lower().replace("_", " ").replace("-", " ")
     signals: list[str] = []
     for keywords, label in DOMAIN_KEYWORD_GROUPS:
-        if any(keyword in normalized_text for keyword in keywords):
+        if label == "resume or CV workflows":
+            has_resume_keyword = any(_contains_keyword(normalized_text, keyword) for keyword in keywords)
+            has_employment_context = any(
+                _contains_keyword(normalized_text, keyword)
+                for keyword in RECRUITMENT_STRONG_CONTEXT_KEYWORDS
+            )
+            has_explicit_phrase = any(
+                _contains_keyword(normalized_text, keyword) for keyword in RECRUITMENT_EXPLICIT_PHRASES
+            )
+            if (has_resume_keyword and has_employment_context) or has_explicit_phrase:
+                signals.append(f"domain signal: {source_label} {verb} {label}")
+            continue
+        if any(_contains_keyword(normalized_text, keyword) for keyword in keywords):
             signals.append(f"domain signal: {source_label} {verb} {label}")
     return signals
 

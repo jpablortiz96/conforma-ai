@@ -107,6 +107,50 @@ export interface DocumentationResponse {
   confidence: number | null;
 }
 
+export interface DisclosureNotices {
+  en: string;
+  it: string;
+  es: string;
+  fr: string;
+  de: string;
+}
+
+export interface DisclosureResponse {
+  audit_id: string;
+  ai_system_id: string;
+  requires_disclosure: boolean;
+  article: string | null;
+  notices: DisclosureNotices | null;
+  placement_recommendations: string[];
+  confidence: number | null;
+  mode: ResponseMode | null;
+}
+
+export type GapSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+
+export interface ComplianceGap {
+  severity: GapSeverity;
+  title: string;
+  description: string;
+  affected_system_id: string | null;
+  recommended_action: string;
+  legal_reference: string;
+}
+
+export interface CompliancePackResponse {
+  audit_id: string;
+  compliance_score: number;
+  estimated_fine_exposure_eur: number;
+  time_to_compliant_days: number;
+  systems_count: number;
+  high_risk_count: number;
+  article_50_count: number;
+  gaps: ComplianceGap[];
+  disclosures: DisclosureResponse[];
+  priority_actions: string[];
+  summary: string;
+}
+
 export interface DemoHighRiskSystemResponse {
   audit_id: string;
   ai_system_id: string;

@@ -66,18 +66,95 @@ class FakeAsyncSession:
         "omnibus_required",
     ),
     [
-        ("resume screening model for recruitment", "HIGH_RISK", "Annex III Section 4(a)", False, "2027-12-02", True),
-        ("CV ranking for recruitment at a bank", "HIGH_RISK", "Annex III Section 4(a)", False, "2027-12-02", True),
-        ("Customer service chatbot for password reset", "LIMITED_RISK", "Article 50(1)", True, "2026-12-02", False),
-        ("Social credit scoring by Dutch municipality", "UNACCEPTABLE", "Article 5(1)(c)", False, "2025-02-02", False),
+        (
+            "resume screening model for recruitment",
+            "HIGH_RISK",
+            "Annex III Section 4(a)",
+            False,
+            "2027-12-02",
+            True,
+        ),
+        (
+            "CV ranking for recruitment at a bank",
+            "HIGH_RISK",
+            "Annex III Section 4(a)",
+            False,
+            "2027-12-02",
+            True,
+        ),
+        (
+            "Customer service chatbot for password reset",
+            "LIMITED_RISK",
+            "Article 50(1)",
+            True,
+            "2026-12-02",
+            False,
+        ),
+        (
+            "Social credit scoring by Dutch municipality",
+            "UNACCEPTABLE",
+            "Article 5(1)(c)",
+            False,
+            "2025-02-02",
+            False,
+        ),
         ("Email spam classifier", "MINIMAL_RISK", "Not applicable", False, None, False),
-        ("AI evaluating insurance premiums for life insurance", "HIGH_RISK", "Annex III Section 5(c)", False, "2027-12-02", True),
-        ("Deep fake video generator marketed to consumers", "LIMITED_RISK", "Article 50(4)", True, "2026-12-02", False),
-        ("Facial recognition for shoplifter detection in supermarkets private", "HIGH_RISK", "Annex III Section 1", False, "2027-12-02", True),
-        ("Real-time biometric ID in public squares for police", "UNACCEPTABLE", "Article 5(1)(h)", False, "2025-02-02", False),
-        ("Predictive maintenance for industrial machinery", "MINIMAL_RISK", "Not applicable", False, None, False),
-        ("Resume scoring AI that also generates explanations", "HIGH_RISK", "Annex III Section 4(a)", True, "2027-12-02", True),
-        ("AI safety component in a medical device", "HIGH_RISK", "Annex I", False, "2028-08-02", False),
+        (
+            "AI evaluating insurance premiums for life insurance",
+            "HIGH_RISK",
+            "Annex III Section 5(c)",
+            False,
+            "2027-12-02",
+            True,
+        ),
+        (
+            "Deep fake video generator marketed to consumers",
+            "LIMITED_RISK",
+            "Article 50(4)",
+            True,
+            "2026-12-02",
+            False,
+        ),
+        (
+            "Facial recognition for shoplifter detection in supermarkets private",
+            "HIGH_RISK",
+            "Annex III Section 1",
+            False,
+            "2027-12-02",
+            True,
+        ),
+        (
+            "Real-time biometric ID in public squares for police",
+            "UNACCEPTABLE",
+            "Article 5(1)(h)",
+            False,
+            "2025-02-02",
+            False,
+        ),
+        (
+            "Predictive maintenance for industrial machinery",
+            "MINIMAL_RISK",
+            "Not applicable",
+            False,
+            None,
+            False,
+        ),
+        (
+            "Resume scoring AI that also generates explanations",
+            "HIGH_RISK",
+            "Annex III Section 4(a)",
+            True,
+            "2027-12-02",
+            True,
+        ),
+        (
+            "AI safety component in a medical device",
+            "HIGH_RISK",
+            "Annex I",
+            False,
+            "2028-08-02",
+            False,
+        ),
     ],
 )
 def test_classifier_fallback_covers_all_required_d3_cases(
@@ -108,6 +185,20 @@ def test_classifier_fallback_covers_all_required_d3_cases(
         assert "Digital Omnibus deal of 7 May 2026" in response.reasoning
     if description == "Resume scoring AI that also generates explanations":
         assert "Article 50(2)" in response.secondary_articles
+
+
+def test_classifier_fallback_generative_guardrail_does_not_append_minimal_risk_reasoning() -> None:
+    """Article 50 guardrails should replace contradictory minimal-risk fallback language."""
+
+    response = classify_with_fallback("Language model training and inference system for synthetic text generation")
+
+    assert response.risk_class == "LIMITED_RISK"
+    assert response.primary_article == "Article 50(2)"
+    assert response.triggers_article_50 is True
+    assert response.deadline_iso is not None
+    assert response.deadline_iso.isoformat() == "2026-12-02"
+    assert "does not clearly map to a prohibited practice" not in response.reasoning
+    assert "smallest solid classification is minimal risk" not in response.reasoning.lower()
 
 
 @pytest.mark.asyncio

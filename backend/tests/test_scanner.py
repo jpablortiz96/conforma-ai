@@ -112,6 +112,28 @@ def _build_resume_screening_repo(repo_root: Path) -> Path:
     return repo_path
 
 
+def _build_llm_resume_training_repo(repo_root: Path) -> Path:
+    repo_path = repo_root / "llm.c"
+    (repo_path / "scripts").mkdir(parents=True)
+    (repo_path / "train_gpt2.py").write_text(
+        "import torch\n# train gpt style transformer\n",
+        encoding="utf-8",
+    )
+    (repo_path / "README.md").write_text(
+        (
+            "# llm.c\n\n"
+            "Minimal language model training and inference project.\n"
+            "Supports checkpoint resume training, transformer inference, and GPT experiments.\n"
+        ),
+        encoding="utf-8",
+    )
+    (repo_path / "scripts" / "README.md").write_text(
+        "Use this script to resume training from a checkpoint.\n",
+        encoding="utf-8",
+    )
+    return repo_path
+
+
 @pytest.mark.asyncio
 async def test_scanner_agent_uses_gemini_output_when_available(
     monkeypatch: pytest.MonkeyPatch,
@@ -283,6 +305,54 @@ async def test_scanner_fallback_avoids_generic_candidate_for_resume_screening_re
         "resume screening workflow" in signal.lower() or "resume or cv workflows" in signal.lower()
         for signal in candidate["detection_signals"]
     )
+    assert cleanup_calls
+    assert not repo_root.exists()
+
+
+@pytest.mark.asyncio
+async def test_scanner_fallback_does_not_misread_resume_training_as_recruitment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """LLM repos that mention resume training should stay generative, not recruitment-related."""
+
+    fake_db = FakeAsyncSession()
+    repo_root = tmp_path / "clone"
+    repo_path = _build_llm_resume_training_repo(repo_root)
+    cleanup_calls: list[Path] = []
+
+    async def fake_shallow_clone(repo_url: str) -> ClonedRepo:
+        return ClonedRepo(temp_dir=repo_root, repo_path=repo_path)
+
+    async def fake_cleanup_clone(cloned_repo: ClonedRepo | Path | str | None) -> None:
+        if cloned_repo is None:
+            return
+        target = cloned_repo.temp_dir if isinstance(cloned_repo, ClonedRepo) else Path(cloned_repo)
+        cleanup_calls.append(target)
+        shutil.rmtree(target, ignore_errors=True)
+
+    async def failing_call_flash_json(prompt: str, temperature: float = 0.0) -> dict[str, object]:
+        raise GeminiClientError("forced fallback")
+
+    monkeypatch.setattr("app.agents.scanner.shallow_clone", fake_shallow_clone)
+    monkeypatch.setattr("app.agents.scanner.cleanup_clone", fake_cleanup_clone)
+    monkeypatch.setattr("app.agents.scanner.call_flash_json", failing_call_flash_json)
+
+    agent = ScannerAgent(fake_db)
+    result = await agent.run(
+        {
+            "repo_url": "https://github.com/karpathy/llm.c",
+            "max_files_to_inspect": 50,
+        },
+        audit_id=uuid4(),
+    )
+
+    assert result["mode"] == "fallback"
+    assert result["ai_systems_found"]
+    candidate = result["ai_systems_found"][0]
+    assert candidate["name"] == "language_model_training_and_inference"
+    assert candidate["name"] != "resume_screening_model"
+    assert "language model" in candidate["description"].lower()
     assert cleanup_calls
     assert not repo_root.exists()
 

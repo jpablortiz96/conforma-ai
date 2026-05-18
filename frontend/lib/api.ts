@@ -5,7 +5,9 @@ import type {
   AuditResponse,
   ClassifierRequest,
   ClassifierResponse,
+  CompliancePackResponse,
   DemoHighRiskSystemResponse,
+  DisclosureResponse,
   DocumentationRequest,
   DocumentationResponse,
   HealthResponse,
@@ -15,13 +17,16 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const DEFAULT_TIMEOUT_MS = 15000;
 const AUDIT_TIMEOUT_MS = 240000;
 const DOCUMENTATION_TIMEOUT_MS = 180000;
+const COMPLIANCE_PACK_TIMEOUT_MS = 180000;
 
 function normalizeAiActText(value: string): string {
   return value
+    .replaceAll("â‚¬", "EUR ")
+    .replaceAll("Ã¢â€šÂ¬", "EUR ")
+    .replaceAll("ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§", "Section ")
     .replaceAll("Ãƒâ€šÃ‚Â§", "Section ")
     .replaceAll("Ã‚Â§", "Section ")
-    .replaceAll("Â§", "Section ")
-    .replaceAll("§", "Section ");
+    .replaceAll("Â§", "Section ");
 }
 
 function normalizeClassifierResponse(payload: ClassifierResponse): ClassifierResponse {
@@ -99,6 +104,39 @@ function normalizeAuditArtifactsResponse(payload: AuditArtifactsResponse): Audit
   return {
     ...payload,
     artifacts: payload.artifacts.map(normalizeArtifactSummary),
+  };
+}
+
+function normalizeDisclosureResponse(payload: DisclosureResponse): DisclosureResponse {
+  return {
+    ...payload,
+    article: payload.article ? normalizeAiActText(payload.article) : null,
+    notices: payload.notices
+      ? {
+          en: normalizeAiActText(payload.notices.en),
+          it: normalizeAiActText(payload.notices.it),
+          es: normalizeAiActText(payload.notices.es),
+          fr: normalizeAiActText(payload.notices.fr),
+          de: normalizeAiActText(payload.notices.de),
+        }
+      : null,
+    placement_recommendations: payload.placement_recommendations.map(normalizeAiActText),
+  };
+}
+
+function normalizeCompliancePackResponse(payload: CompliancePackResponse): CompliancePackResponse {
+  return {
+    ...payload,
+    summary: normalizeAiActText(payload.summary),
+    disclosures: payload.disclosures.map(normalizeDisclosureResponse),
+    priority_actions: payload.priority_actions.map(normalizeAiActText),
+    gaps: payload.gaps.map((gap) => ({
+      ...gap,
+      title: normalizeAiActText(gap.title),
+      description: normalizeAiActText(gap.description),
+      recommended_action: normalizeAiActText(gap.recommended_action),
+      legal_reference: normalizeAiActText(gap.legal_reference),
+    })),
   };
 }
 
@@ -209,6 +247,19 @@ export async function generateDocumentation(
   );
 
   return normalizeDocumentationResponse(await parseResponse<DocumentationResponse>(response));
+}
+
+export async function generateCompliancePack(auditId: string): Promise<CompliancePackResponse> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/api/v1/audits/${auditId}/compliance-pack`,
+    {
+      method: "POST",
+      cache: "no-store",
+    },
+    COMPLIANCE_PACK_TIMEOUT_MS,
+  );
+
+  return normalizeCompliancePackResponse(await parseResponse<CompliancePackResponse>(response));
 }
 
 export async function createDemoHighRiskSystem(): Promise<DemoHighRiskSystemResponse> {

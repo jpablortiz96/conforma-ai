@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createDemoHighRiskSystem,
+  generateCompliancePack,
   generateDocumentation,
   getApiBaseUrl,
   getHealth,
@@ -28,9 +29,12 @@ import type {
   AgentPipelineItem,
   ArtifactSummary,
   AuditProgressStage,
+  CompliancePackResponse,
+  DisclosureResponse,
   AuditResponse,
   DemoHighRiskSystemResponse,
   DocumentationResponse,
+  GapSeverity,
   HealthResponse,
   RiskClass,
   SampleRepo,
@@ -135,6 +139,35 @@ const riskIndexTone = (value: number): string => {
   return "text-emerald-200";
 };
 
+const complianceScoreTone = (value: number): string => {
+  if (value >= 85) return "text-emerald-200";
+  if (value >= 65) return "text-sky-200";
+  if (value >= 40) return "text-amber-200";
+  return "text-rose-200";
+};
+
+const complianceScoreBand = (value: number): string => {
+  if (value >= 85) return "Strong";
+  if (value >= 65) return "On track";
+  if (value >= 40) return "At risk";
+  return "Critical";
+};
+
+const gapSeverityTone: Record<GapSeverity, string> = {
+  CRITICAL: "bg-rose-500/15 text-rose-100 ring-1 ring-rose-400/35",
+  HIGH: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-300/35",
+  MEDIUM: "bg-sky-500/15 text-sky-100 ring-1 ring-sky-300/35",
+  LOW: "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/35",
+};
+
+function formatEuros(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 function getSimulatedProgress(elapsedMs: number): number {
   let remainingMs = elapsedMs;
 
@@ -165,6 +198,11 @@ function buildPipeline(
   audit: AuditResponse | null,
   isAuditRunning: boolean,
   stageIndex: number,
+  documentationReady: boolean,
+  isDocumentationRunning: boolean,
+  compliancePackReady: boolean,
+  isCompliancePackRunning: boolean,
+  hasDisclosureSystems: boolean,
 ): AgentPipelineItem[] {
   const scannerState = audit
     ? "complete"
@@ -180,6 +218,27 @@ function buildPipeline(
         ? "active"
         : "idle"
       : "idle";
+  const documentationState = documentationReady
+    ? "complete"
+    : isDocumentationRunning
+      ? "active"
+      : audit
+        ? "idle"
+        : "queued";
+  const disclosureState = compliancePackReady && hasDisclosureSystems
+    ? "complete"
+    : isCompliancePackRunning && hasDisclosureSystems
+      ? "active"
+      : audit
+        ? "idle"
+        : "queued";
+  const gapAuditorState = compliancePackReady
+    ? "complete"
+    : isCompliancePackRunning
+      ? "active"
+      : audit
+        ? "idle"
+        : "queued";
 
   return [
     {
@@ -189,7 +248,7 @@ function buildPipeline(
       state: scannerState,
       cue:
         scannerState === "active"
-          ? "Live in D4A"
+          ? "Live in D4B"
           : scannerState === "complete"
             ? "Completed"
             : "Ready",
@@ -201,7 +260,7 @@ function buildPipeline(
       state: classifierState,
       cue:
         classifierState === "active"
-          ? "Live in D4A"
+          ? "Live in D4B"
           : classifierState === "complete"
             ? "Completed"
             : "Queued after scan",
@@ -210,22 +269,37 @@ function buildPipeline(
       name: "Documentation",
       model: "gemini-3.1-pro-preview",
       blurb: "Generate Annex IV technical documentation and PDF artifacts for high-risk systems.",
-      state: "idle",
-      cue: "Live on demand in D4A",
+      state: documentationState,
+      cue:
+        documentationState === "complete"
+          ? "Artifact ready"
+          : documentationState === "active"
+            ? "Generating"
+            : "Live on demand",
     },
     {
       name: "Disclosure",
       model: "gemini-3-flash-preview",
-      blurb: "Article 50 disclosure drafts and deployer notices arrive next.",
-      state: "queued",
-      cue: "Queued for D4",
+      blurb: "Generate multilingual Article 50 notices and placement guidance for exposed users.",
+      state: disclosureState,
+      cue:
+        disclosureState === "complete"
+          ? "Pack ready"
+          : disclosureState === "active"
+            ? "Generating"
+            : "Ready in pack",
     },
     {
       name: "Gap Auditor",
       model: "gemini-3.1-pro-preview",
-      blurb: "Compliance scoring and remediation priority mapping follow next.",
-      state: "queued",
-      cue: "Queued for D4",
+      blurb: "Compute compliance score, fine exposure, and prioritized remediation gaps.",
+      state: gapAuditorState,
+      cue:
+        gapAuditorState === "complete"
+          ? "Completed"
+          : gapAuditorState === "active"
+            ? "Scoring"
+            : "Ready in pack",
     },
     {
       name: "Monitor",
@@ -287,10 +361,13 @@ export default function HomePage() {
   const [isAuditRunning, setIsAuditRunning] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [stageIndex, setStageIndex] = useState<number>(0);
-  const [artifactMap, setArtifactMap] = useState<Record<string, ArtifactSummary>>({});
+  const [annexIvArtifactMap, setAnnexIvArtifactMap] = useState<Record<string, ArtifactSummary>>({});
   const [documentationMap, setDocumentationMap] = useState<Record<string, DocumentationResponse>>({});
   const [documentationErrors, setDocumentationErrors] = useState<Record<string, string>>({});
   const [documentationLoadingId, setDocumentationLoadingId] = useState<string | null>(null);
+  const [compliancePack, setCompliancePack] = useState<CompliancePackResponse | null>(null);
+  const [compliancePackError, setCompliancePackError] = useState<string | null>(null);
+  const [isCompliancePackRunning, setIsCompliancePackRunning] = useState<boolean>(false);
   const [demoSystem, setDemoSystem] = useState<DemoHighRiskSystemResponse | null>(null);
   const [isCreatingDemo, setIsCreatingDemo] = useState<boolean>(false);
   const [demoError, setDemoError] = useState<string | null>(null);
@@ -357,33 +434,83 @@ export default function HomePage() {
         const payload = await listAuditArtifacts(audit.audit_id);
         const nextArtifacts: Record<string, ArtifactSummary> = {};
         payload.artifacts.forEach((artifact) => {
-          if (artifact.ai_system_id) {
+          if (artifact.ai_system_id && artifact.kind === "annex_iv_pdf") {
             nextArtifacts[artifact.ai_system_id] = artifact;
           }
         });
-        setArtifactMap((currentArtifacts) => ({ ...currentArtifacts, ...nextArtifacts }));
+        setAnnexIvArtifactMap((currentArtifacts) => ({ ...currentArtifacts, ...nextArtifacts }));
       } catch {
         return;
       }
     })();
   }, [audit]);
 
+  const documentationReady = useMemo(
+    () =>
+      Object.keys(annexIvArtifactMap).length > 0 ||
+      Object.values(documentationMap).some(
+        (response) => response.required && response.status === "generated",
+      ),
+    [annexIvArtifactMap, documentationMap],
+  );
+  const hasDisclosureSystems = useMemo(
+    () => audit?.systems.some((system) => system.triggers_article_50) ?? false,
+    [audit],
+  );
   const pipeline = useMemo(
-    () => buildPipeline(audit, isAuditRunning, stageIndex),
-    [audit, isAuditRunning, stageIndex],
+    () =>
+      buildPipeline(
+        audit,
+        isAuditRunning,
+        stageIndex,
+        documentationReady,
+        documentationLoadingId !== null,
+        compliancePack !== null,
+        isCompliancePackRunning,
+        hasDisclosureSystems,
+      ),
+    [
+      audit,
+      compliancePack,
+      documentationLoadingId,
+      documentationReady,
+      hasDisclosureSystems,
+      isAuditRunning,
+      isCompliancePackRunning,
+      stageIndex,
+    ],
   );
   const currentStage = auditStages[stageIndex] ?? auditStages[0];
+  const disclosureMap = useMemo(() => {
+    const nextMap: Record<string, DisclosureResponse> = {};
+    compliancePack?.disclosures.forEach((disclosure) => {
+      nextMap[disclosure.ai_system_id] = disclosure;
+    });
+    return nextMap;
+  }, [compliancePack]);
+  const complianceGapCounts = useMemo(() => {
+    const counts: Record<GapSeverity, number> = {
+      CRITICAL: 0,
+      HIGH: 0,
+      MEDIUM: 0,
+      LOW: 0,
+    };
+    compliancePack?.gaps.forEach((gap) => {
+      counts[gap.severity] += 1;
+    });
+    return counts;
+  }, [compliancePack]);
 
   const refreshArtifacts = async (auditId: string) => {
     try {
       const payload = await listAuditArtifacts(auditId);
       const nextArtifacts: Record<string, ArtifactSummary> = {};
       payload.artifacts.forEach((artifact) => {
-        if (artifact.ai_system_id) {
+        if (artifact.ai_system_id && artifact.kind === "annex_iv_pdf") {
           nextArtifacts[artifact.ai_system_id] = artifact;
         }
       });
-      setArtifactMap((currentArtifacts) => ({ ...currentArtifacts, ...nextArtifacts }));
+      setAnnexIvArtifactMap((currentArtifacts) => ({ ...currentArtifacts, ...nextArtifacts }));
     } catch {
       return;
     }
@@ -431,7 +558,7 @@ export default function HomePage() {
         [options.aiSystemId]: response,
       }));
       if (response.artifact) {
-        setArtifactMap((currentArtifacts) => ({
+        setAnnexIvArtifactMap((currentArtifacts) => ({
           ...currentArtifacts,
           [options.aiSystemId]: response.artifact!,
         }));
@@ -489,7 +616,7 @@ export default function HomePage() {
   };
 
   const applySample = (sample: SampleRepo) => {
-    if (isAuditRunning) {
+    if (isAuditRunning || isCompliancePackRunning) {
       return;
     }
 
@@ -501,9 +628,11 @@ export default function HomePage() {
   const submit = async () => {
     setRequestError(null);
     setAudit(null);
-    setArtifactMap({});
+    setAnnexIvArtifactMap({});
     setDocumentationMap({});
     setDocumentationErrors({});
+    setCompliancePack(null);
+    setCompliancePackError(null);
     setIsAuditRunning(true);
     setProgress(6);
     setStageIndex(0);
@@ -531,6 +660,29 @@ export default function HomePage() {
     }
   };
 
+  const runCompliancePack = async () => {
+    if (!audit) {
+      return;
+    }
+
+    setCompliancePackError(null);
+    setIsCompliancePackRunning(true);
+
+    try {
+      const payload = await generateCompliancePack(audit.audit_id);
+      setCompliancePack(payload);
+      await refreshArtifacts(audit.audit_id);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Compliance Pack generation failed. Verify that the backend is running and try again.";
+      setCompliancePackError(message);
+    } finally {
+      setIsCompliancePackRunning(false);
+    }
+  };
+
   const isRunningWithoutResults = isAuditRunning && !audit;
 
   return (
@@ -545,7 +697,7 @@ export default function HomePage() {
                 Conforma-AI Audit Console
               </div>
               <p className="mt-5 text-sm font-semibold uppercase tracking-[0.32em] text-sky-200/90">
-                D4A Demo Grade
+                D4B Demo Grade
               </p>
               <h1 className="mt-3 max-w-4xl text-4xl font-semibold tracking-tight text-slate-50 md:text-6xl">
                 Scanner, Classifier, and Annex IV documentation inside one EU AI Act console.
@@ -587,13 +739,13 @@ export default function HomePage() {
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt>Execution mode</dt>
-                  <dd className="text-slate-100">Synchronous D4A audit flow</dd>
+                  <dd className="text-slate-100">Synchronous D4B audit flow</dd>
                 </div>
               </dl>
               <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-slate-300">
-                D4A keeps Scanner plus Classifier synchronous, and now exposes Documentation on
-                demand for any high-risk system card. Disclosure, Gap Auditor, and Monitor remain
-                visible as the next pipeline stages.
+                D4B keeps the main audit synchronous, then layers Documentation, Disclosure, and
+                Gap Auditor on demand once the AI systems inventory is ready. Monitor remains the
+                next visible stage in the six-agent roadmap.
               </p>
             </div>
           </div>
@@ -621,7 +773,7 @@ export default function HomePage() {
               type="url"
               value={repoUrl}
               onChange={(event) => setRepoUrl(event.target.value)}
-              disabled={isAuditRunning}
+              disabled={isAuditRunning || isCompliancePackRunning}
               className="mt-3 w-full rounded-[24px] border border-white/10 bg-slate-950/55 px-4 py-4 text-base text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 disabled:cursor-not-allowed disabled:opacity-70"
               placeholder="https://github.com/org/repo"
             />
@@ -643,10 +795,10 @@ export default function HomePage() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   {sampleRepos.map((sample) => (
                     <button
-                      key={sample.label}
-                      type="button"
-                      onClick={() => applySample(sample)}
-                      disabled={isAuditRunning}
+                       key={sample.label}
+                       type="button"
+                       onClick={() => applySample(sample)}
+                       disabled={isAuditRunning || isCompliancePackRunning}
                       className="rounded-full border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-200 transition hover:border-sky-300/40 hover:bg-sky-500/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {sample.label}
@@ -669,7 +821,7 @@ export default function HomePage() {
                       : "border-white/10 bg-slate-950/30 text-slate-400"
                   }`}
                 >
-                  <span className="font-semibold text-slate-100">{sample.label}</span> ·{" "}
+                  <span className="font-semibold text-slate-100">{sample.label}</span> -{" "}
                   {sample.note}
                 </div>
               ))}
@@ -681,7 +833,7 @@ export default function HomePage() {
                 onClick={() => {
                   void submit();
                 }}
-                disabled={isAuditRunning}
+                disabled={isAuditRunning || isCompliancePackRunning}
                 className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isAuditRunning ? (
@@ -737,7 +889,7 @@ export default function HomePage() {
                       )}
                     </button>
                     <p className="text-sm text-slate-400">
-                      Seeds a bank CV ranking system for internal D4A PDF validation.
+                      Seeds a bank CV ranking system for internal D4B validation.
                     </p>
                   </div>
 
@@ -781,9 +933,9 @@ export default function HomePage() {
                               "Generate Annex IV PDF"
                             )}
                           </button>
-                          {artifactMap[demoSystem.ai_system_id] ? (
+                          {annexIvArtifactMap[demoSystem.ai_system_id] ? (
                             <a
-                              href={artifactMap[demoSystem.ai_system_id].download_url}
+                              href={annexIvArtifactMap[demoSystem.ai_system_id].download_url}
                               target="_blank"
                               rel="noreferrer"
                               className="text-sm font-semibold text-sky-100 underline decoration-sky-300/50 underline-offset-4"
@@ -904,8 +1056,8 @@ export default function HomePage() {
                 {isAuditRunning
                   ? currentStage.detail
                   : audit
-                    ? "Scanner and Classifier completed. Documentation is now available on demand for each high-risk system, while Disclosure, Gap Auditor, and Monitor remain queued."
-                    : "Launch a repo audit to activate Scanner plus Classifier, then generate Annex IV PDFs for any high-risk findings."}
+                    ? "Scanner and Classifier completed. Documentation, Disclosure, and Gap Auditor are now available on demand for the selected audit."
+                    : "Launch a repo audit to activate Scanner plus Classifier, then generate Annex IV PDFs and a compliance pack from the resulting inventory."}
               </p>
 
               <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/8">
@@ -954,7 +1106,7 @@ export default function HomePage() {
             </div>
 
             <p className="mt-4 text-sm leading-6 text-slate-400">
-              This D4A console keeps the core audit synchronous. LangGraph fan-out and SSE streaming arrive later.
+              This D4B console keeps the core audit synchronous. LangGraph fan-out and SSE streaming arrive later.
             </p>
 
             <div className="mt-6 grid gap-3">
@@ -1085,19 +1237,56 @@ export default function HomePage() {
                 </div>
 
                 <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5 text-sm">
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                     <div>
                       <p className="text-slate-400">Audit ID</p>
                       <p className="mt-1 font-mono text-xs text-slate-100 md:text-sm">
                         {audit.audit_id}
                       </p>
+                      <p className="mt-5 leading-7 text-slate-300">{audit.summary}</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-slate-400">Status</p>
-                      <p className="mt-1 font-semibold text-emerald-100">{audit.status}</p>
+                    <div className="flex min-w-[220px] flex-col items-start gap-3 xl:items-end">
+                      <div className="text-left xl:text-right">
+                        <p className="text-slate-400">Status</p>
+                        <p className="mt-1 font-semibold text-emerald-100">{audit.status}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void runCompliancePack();
+                        }}
+                        disabled={isCompliancePackRunning}
+                        className="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 transition hover:border-sky-300/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isCompliancePackRunning ? (
+                          <>
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                            Generating Compliance Pack...
+                          </>
+                        ) : (
+                          <>
+                            Generate Compliance Pack
+                            <ArrowRight className="h-4 w-4" />
+                          </>
+                        )}
+                      </button>
+                      {compliancePack ? (
+                        <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-left text-xs leading-6 text-emerald-100 xl:text-right">
+                          <p className="font-semibold uppercase tracking-[0.16em] text-emerald-100/90">
+                            Latest pack
+                          </p>
+                          <p className="mt-1">
+                            Score {compliancePack.compliance_score}/100 - {compliancePack.gaps.length} gap(s)
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="max-w-[220px] text-left text-xs leading-6 text-slate-400 xl:text-right">
+                          Generate the D4B pack to compute disclosure notices, compliance score,
+                          and remediation priorities.
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <p className="mt-5 leading-7 text-slate-300">{audit.summary}</p>
                 </div>
               </div>
             ) : null}
@@ -1178,9 +1367,11 @@ export default function HomePage() {
               <div className="mt-6 grid gap-4 fade-rise">
                 {audit.systems.map((system) => {
                   const documentationResponse = documentationMap[system.id];
-                  const artifact = documentationResponse?.artifact ?? artifactMap[system.id] ?? null;
+                  const artifact =
+                    documentationResponse?.artifact ?? annexIvArtifactMap[system.id] ?? null;
                   const documentationError = documentationErrors[system.id];
                   const isDocumentationLoading = documentationLoadingId === system.id;
+                  const disclosure = disclosureMap[system.id];
 
                   return (
                     <article
@@ -1200,6 +1391,21 @@ export default function HomePage() {
                             <span className="rounded-full bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-100 ring-1 ring-sky-400/30">
                               Article 50 trigger
                             </span>
+                          ) : null}
+                          {system.triggers_article_50 ? (
+                            disclosure?.requires_disclosure ? (
+                              <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100 ring-1 ring-emerald-300/30">
+                                Disclosure ready
+                              </span>
+                            ) : compliancePack ? (
+                              <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100 ring-1 ring-amber-300/30">
+                                Disclosure pending
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300 ring-1 ring-white/10">
+                                Disclosure status pending
+                              </span>
+                            )
                           ) : null}
                         </div>
                         <p className="mt-3 max-w-4xl text-sm leading-7 text-slate-300">
@@ -1285,6 +1491,18 @@ export default function HomePage() {
                             {system.deadline}
                           </span>
                         </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <span className="text-slate-400">Disclosure</span>
+                          <span className="max-w-[160px] text-right text-slate-100">
+                            {system.triggers_article_50
+                              ? disclosure?.requires_disclosure
+                                ? disclosure.article ?? "Required"
+                                : compliancePack
+                                  ? "Pending rollout"
+                                  : "Awaiting pack"
+                              : "Not required"}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -1362,6 +1580,369 @@ export default function HomePage() {
         </section>
 
         <section className="panel-shell">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-200">
+                Compliance Pack
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-slate-50">
+                Disclosure coverage, gap matrix, and compliance score
+              </h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-7 text-slate-400">
+              Generate the D4B pack after the audit to compute a deterministic compliance score,
+              estimate scenario-based fine exposure, and produce Article 50 notices when the
+              systems inventory requires them.
+            </p>
+          </div>
+
+          {!audit ? (
+            <div className="mt-6 rounded-[28px] border border-dashed border-white/10 bg-white/[0.03] p-6 text-sm leading-7 text-slate-400">
+              Run an audit first, then generate the compliance pack to surface disclosure status,
+              severity-ranked gaps, and remediation priorities.
+            </div>
+          ) : null}
+
+          {audit && isCompliancePackRunning ? (
+            <div className="mt-6 grid gap-4 fade-rise lg:grid-cols-[0.74fr_1.26fr]">
+              <div className="rounded-[28px] border border-sky-400/20 bg-slate-950/55 p-6">
+                <div className="flex items-center gap-3 text-sm font-semibold uppercase tracking-[0.18em] text-sky-100">
+                  <span className="live-dot h-2.5 w-2.5 rounded-full bg-sky-300" />
+                  Compliance Pack running
+                </div>
+                <p className="mt-4 text-4xl font-semibold tracking-tight text-slate-50">
+                  Disclosure + Gap Auditor
+                </p>
+                <p className="mt-3 text-sm leading-7 text-slate-300">
+                  Generating multilingual notices, checking Annex IV coverage, and computing the
+                  deterministic compliance score.
+                </p>
+                <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/8">
+                  <div className="progress-shell h-full rounded-full" style={{ width: "82%" }} />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {["Compliance score", "Estimated exposure", "Gap matrix", "Priority actions"].map(
+                  (placeholder) => (
+                    <div
+                      key={placeholder}
+                      className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5"
+                    >
+                      <div className="h-4 w-40 rounded-full bg-white/8" />
+                      <div className="mt-4 h-12 w-24 rounded-full bg-sky-500/10" />
+                      <div className="mt-5 grid gap-2">
+                        <div className="h-4 w-full rounded-full bg-white/8" />
+                        <div className="h-4 w-10/12 rounded-full bg-white/8" />
+                        <div className="h-4 w-8/12 rounded-full bg-white/8" />
+                      </div>
+                    </div>
+                  ),
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {audit && compliancePackError ? (
+            <div className="mt-6 rounded-[28px] border border-rose-400/30 bg-rose-500/10 p-5 text-sm leading-7 text-rose-100 fade-rise">
+              {compliancePackError}
+            </div>
+          ) : null}
+
+          {audit && !compliancePack && !isCompliancePackRunning && !compliancePackError ? (
+            <div className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-sm leading-7 text-slate-300">
+              <p className="font-semibold text-slate-50">No compliance pack generated yet</p>
+              <p className="mt-2">
+                Use the action above to generate Article 50 notices where needed, score the audit,
+                and persist a gap snapshot into Postgres.
+              </p>
+            </div>
+          ) : null}
+
+          {audit && compliancePack ? (
+            <div className="mt-6 grid gap-6 fade-rise">
+              <div className="grid gap-4 xl:grid-cols-4">
+                <article className="relative overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/50 p-6">
+                  <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),_transparent_60%)]" />
+                  <div className="relative">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      Compliance Score
+                    </p>
+                    <div className="mt-3 flex items-end gap-4">
+                      <span
+                        className={`text-6xl font-semibold tracking-tight ${complianceScoreTone(compliancePack.compliance_score)}`}
+                      >
+                        {compliancePack.compliance_score}
+                      </span>
+                      <span className="pb-2 text-lg text-slate-400">/ 100</span>
+                    </div>
+                    <p className="mt-3 text-sm font-medium text-slate-300">
+                      {complianceScoreBand(compliancePack.compliance_score)}
+                    </p>
+                  </div>
+                </article>
+
+                <article className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Estimated Fine Exposure
+                  </p>
+                  <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-50">
+                    {formatEuros(compliancePack.estimated_fine_exposure_eur)}
+                  </p>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">
+                    Scenario-based heuristic for demo purposes only, not legal advice.
+                  </p>
+                </article>
+
+                <article className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Time-to-Compliant
+                  </p>
+                  <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-50">
+                    {compliancePack.time_to_compliant_days}
+                  </p>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">
+                    Days until the earliest relevant compliance deadline in the current pack.
+                  </p>
+                </article>
+
+                <article className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Coverage snapshot
+                  </p>
+                  <div className="mt-4 grid gap-3 text-sm text-slate-300">
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Systems</span>
+                      <span className="font-semibold text-slate-100">
+                        {compliancePack.systems_count}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span>High-risk</span>
+                      <span className="font-semibold text-slate-100">
+                        {compliancePack.high_risk_count}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Article 50</span>
+                      <span className="font-semibold text-slate-100">
+                        {compliancePack.article_50_count}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Open gaps</span>
+                      <span className="font-semibold text-slate-100">
+                        {compliancePack.gaps.length}
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  Compliance summary
+                </p>
+                <p className="mt-4 max-w-4xl text-sm leading-7 text-slate-300">
+                  {compliancePack.summary}
+                </p>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                <div className="grid gap-6">
+                  <article className="rounded-[28px] border border-white/10 bg-slate-950/45 p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
+                          Gap Matrix
+                        </p>
+                        <h3 className="mt-2 text-xl font-semibold text-slate-50">
+                          Severity-ranked remediation backlog
+                        </h3>
+                      </div>
+                      <Scale className="h-5 w-5 text-sky-200" />
+                    </div>
+
+                    <div className="mt-5 grid gap-3 md:grid-cols-4">
+                      {(["CRITICAL", "HIGH", "MEDIUM", "LOW"] as GapSeverity[]).map((severity) => (
+                        <div
+                          key={severity}
+                          className={`rounded-[22px] px-4 py-4 text-sm ${gapSeverityTone[severity]}`}
+                        >
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em]">
+                            {severity}
+                          </p>
+                          <p className="mt-3 text-3xl font-semibold tracking-tight">
+                            {complianceGapCounts[severity]}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-5 grid gap-3">
+                      {compliancePack.gaps.length > 0 ? (
+                        compliancePack.gaps.map((gap, index) => (
+                          <article
+                            key={`${gap.title}-${index}`}
+                            className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4"
+                          >
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span
+                                className={`rounded-full px-3 py-1 text-xs font-semibold ${gapSeverityTone[gap.severity]}`}
+                              >
+                                {gap.severity}
+                              </span>
+                              <h4 className="text-base font-semibold text-slate-50">{gap.title}</h4>
+                            </div>
+                            <p className="mt-3 text-sm leading-7 text-slate-300">
+                              {gap.description}
+                            </p>
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
+                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                  Recommended action
+                                </p>
+                                <p className="mt-2 leading-6">{gap.recommended_action}</p>
+                              </div>
+                              <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
+                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                  Legal reference
+                                </p>
+                                <p className="mt-2 leading-6">{gap.legal_reference}</p>
+                              </div>
+                            </div>
+                          </article>
+                        ))
+                      ) : (
+                        <div className="rounded-[22px] border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm leading-7 text-emerald-100">
+                          No open gaps were generated for this compliance pack snapshot.
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                </div>
+
+                <div className="grid gap-6">
+                  <article className="rounded-[28px] border border-white/10 bg-slate-950/45 p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
+                          Priority Actions
+                        </p>
+                        <h3 className="mt-2 text-xl font-semibold text-slate-50">
+                          First remediation moves
+                        </h3>
+                      </div>
+                      <Sparkles className="h-5 w-5 text-sky-200" />
+                    </div>
+                    <div className="mt-5 grid gap-3">
+                      {compliancePack.priority_actions.length > 0 ? (
+                        compliancePack.priority_actions.map((action) => (
+                          <div
+                            key={action}
+                            className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-7 text-slate-300"
+                          >
+                            {action}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-7 text-slate-400">
+                          Priority actions will appear here after the compliance pack is generated.
+                        </div>
+                      )}
+                    </div>
+                  </article>
+
+                  <article className="rounded-[28px] border border-white/10 bg-slate-950/45 p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
+                          Article 50 Notices
+                        </p>
+                        <h3 className="mt-2 text-xl font-semibold text-slate-50">
+                          Multilingual deployer-ready disclosures
+                        </h3>
+                      </div>
+                      <Eye className="h-5 w-5 text-sky-200" />
+                    </div>
+
+                    {compliancePack.disclosures.length === 0 ? (
+                      <div className="mt-5 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 text-sm leading-7 text-slate-300">
+                        {compliancePack.article_50_count === 0
+                          ? "No Article 50 disclosures were required for this audit."
+                          : "Disclosure-ready systems were detected, but no notices were returned in this pack."}
+                      </div>
+                    ) : (
+                      <div className="mt-5 grid gap-4">
+                        {compliancePack.disclosures.map((disclosure) => (
+                          <article
+                            key={disclosure.ai_system_id}
+                            className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4"
+                          >
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="rounded-full bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-100 ring-1 ring-sky-400/30">
+                                {disclosure.article ?? "Article 50"}
+                              </span>
+                              <span className="rounded-full border border-white/10 bg-slate-950/45 px-3 py-1 text-xs font-mono text-slate-300">
+                                {disclosure.ai_system_id}
+                              </span>
+                            </div>
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              {disclosure.notices ? (
+                                ([
+                                  ["EN", disclosure.notices.en],
+                                  ["IT", disclosure.notices.it],
+                                  ["ES", disclosure.notices.es],
+                                  ["FR", disclosure.notices.fr],
+                                  ["DE", disclosure.notices.de],
+                                ] as const).map(([language, notice]) => (
+                                  <div
+                                    key={`${disclosure.ai_system_id}-${language}`}
+                                    className="rounded-2xl border border-white/10 bg-slate-950/45 p-4"
+                                  >
+                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                      {language}
+                                    </p>
+                                    <p className="mt-3 text-sm leading-7 text-slate-300">
+                                      {notice}
+                                    </p>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 text-sm leading-7 text-slate-400 md:col-span-2">
+                                  No notice body is available for this disclosure.
+                                </div>
+                              )}
+                            </div>
+                            {disclosure.placement_recommendations.length > 0 ? (
+                              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                  Placement recommendations
+                                </p>
+                                <div className="mt-3 grid gap-2">
+                                  {disclosure.placement_recommendations.map((recommendation) => (
+                                    <p
+                                      key={recommendation}
+                                      className="text-sm leading-7 text-slate-300"
+                                    >
+                                      {recommendation}
+                                    </p>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="panel-shell">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-200">
@@ -1372,9 +1953,9 @@ export default function HomePage() {
               </h2>
             </div>
             <p className="max-w-2xl text-sm leading-7 text-slate-400">
-              D4A keeps the main audit path synchronous, then lets you generate Annex IV PDFs on
-              demand for high-risk systems. The remaining three future agents stay visible so the
-              interface still reads like a compliance operating system, not a single-form demo.
+              D4B keeps the main audit path synchronous, then layers Annex IV artifacts,
+              multilingual Article 50 notices, and a deterministic compliance score on top. The
+              Monitor agent remains visible as the final loop that lands later.
             </p>
           </div>
 
@@ -1386,14 +1967,14 @@ export default function HomePage() {
                 body: "Annex IV structured output and PDF generation are now available directly from every high-risk system card.",
               },
               {
-                title: "Disclosure soon",
+                title: "Disclosure live",
                 icon: Eye,
-                body: "Article 50 notice generation will add deployer-facing snippets and placement guidance.",
+                body: "Article 50 notice generation now adds multilingual deployer-facing notices and placement guidance.",
               },
               {
-                title: "Gap Auditor soon",
+                title: "Gap Auditor live",
                 icon: Scale,
-                body: "Portfolio scoring will expand into explicit remediation gaps and executive summaries.",
+                body: "Compliance packs now compute score, exposure, severity-ranked gaps, and priority actions.",
               },
               {
                 title: "Monitor soon",
@@ -1423,3 +2004,4 @@ export default function HomePage() {
     </main>
   );
 }
+

@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
@@ -36,6 +37,25 @@ RECRUITMENT_DOMAIN_TOKENS = (
     "job matching",
     "talent acquisition",
 )
+RECRUITMENT_BASE_TOKENS = ("resume", "cv", "curriculum vitae")
+RECRUITMENT_STRONG_CONTEXT_TOKENS = (
+    "recruitment",
+    "hiring",
+    "candidate",
+    "applicant",
+    "job matching",
+    "talent acquisition",
+    "employment",
+)
+RECRUITMENT_EXPLICIT_PHRASES = (
+    "resume screening",
+    "cv screening",
+    "candidate ranking",
+    "applicant screening",
+    "recruitment screening",
+    "resume scoring",
+    "resume ranking",
+)
 GENERIC_CANDIDATE_NAMES = {
     "repository_ai_feature",
     "generic_ai_feature",
@@ -58,6 +78,23 @@ def _repo_name_from_url(repo_url: str) -> str:
         return "repository"
     name = path.rsplit("/", 1)[-1]
     return name.removesuffix(".git") or "repository"
+
+
+def _has_recruitment_domain_evidence(normalized_text: str) -> bool:
+    """Require both resume/CV language and employment-decision context."""
+
+    def contains_keyword(keyword: str) -> bool:
+        normalized_keyword = keyword.lower().replace("-", " ").strip()
+        if not normalized_keyword:
+            return False
+        pattern = r"\b" + r"\s+".join(re.escape(part) for part in normalized_keyword.split()) + r"\b"
+        return re.search(pattern, normalized_text) is not None
+
+    has_base_signal = any(contains_keyword(token) for token in RECRUITMENT_BASE_TOKENS)
+    has_context_signal = any(contains_keyword(token) for token in RECRUITMENT_STRONG_CONTEXT_TOKENS)
+    return (has_base_signal and has_context_signal) or any(
+        contains_keyword(phrase) for phrase in RECRUITMENT_EXPLICIT_PHRASES
+    )
 
 
 class ScannerAgent(BaseAgent):
@@ -413,7 +450,7 @@ class ScannerAgent(BaseAgent):
                     ]
                 )
         normalized = _normalize_text(" ".join(evidence_parts))
-        return any(token in normalized for token in RECRUITMENT_DOMAIN_TOKENS)
+        return _has_recruitment_domain_evidence(normalized)
 
     def _candidate_mentions_recruitment(self, candidate: AISystemCandidate) -> bool:
         """Check whether a Gemini candidate already carries recruitment evidence."""
@@ -428,7 +465,7 @@ class ScannerAgent(BaseAgent):
                 ]
             )
         )
-        return any(token in normalized for token in RECRUITMENT_DOMAIN_TOKENS)
+        return _has_recruitment_domain_evidence(normalized)
 
     def _build_recruitment_candidate(
         self,
@@ -454,7 +491,9 @@ class ScannerAgent(BaseAgent):
         matching_files = [
             candidate.path
             for candidate in inspection.candidate_files
-            if any(token in _normalize_text(f"{candidate.path} {candidate.excerpt}") for token in RECRUITMENT_DOMAIN_TOKENS)
+            if _has_recruitment_domain_evidence(
+                _normalize_text(f"{candidate.path} {candidate.excerpt}")
+            )
         ]
         if not matching_files:
             matching_files = [candidate.path for candidate in inspection.candidate_files[:6]]
@@ -476,7 +515,7 @@ class ScannerAgent(BaseAgent):
         normalized_repo_name = _normalize_text(repo_name)
         signals: list[str] = []
 
-        if any(token in normalized_repo_name for token in RECRUITMENT_DOMAIN_TOKENS):
+        if _has_recruitment_domain_evidence(normalized_repo_name):
             signals.append(f"repository signal: repository name contains {repo_name}")
 
         for collection in (
@@ -486,7 +525,7 @@ class ScannerAgent(BaseAgent):
         ):
             for signal in collection:
                 normalized_signal = _normalize_text(signal)
-                if any(token in normalized_signal for token in RECRUITMENT_DOMAIN_TOKENS) or (
+                if _has_recruitment_domain_evidence(normalized_signal) or (
                     signal.startswith("README signal:") and "machine learning" in normalized_signal
                 ):
                     if signal not in signals:
