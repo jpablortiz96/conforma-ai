@@ -18,6 +18,7 @@ except Exception:  # pragma: no cover - guarded at runtime
     HTML = None  # type: ignore[assignment]
 
 from app.schemas.agent import AnnexIVDocument
+from app.knowledge.eu_ai_act_kb import deadline_for_classification
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 TEMPLATE_PATH = BACKEND_DIR / "app" / "templates" / "annex_iv_document.html"
@@ -67,12 +68,19 @@ def render_annex_iv_html(
     generated_at = generated_at or datetime.now(timezone.utc)
     environment = _build_template_environment()
     template = environment.get_template(TEMPLATE_PATH.name)
+    deadline_text, deadline_iso = deadline_for_classification(
+        risk_class,
+        triggers_article_50=False,
+        primary_article=primary_article,
+    )
+    deadline_display = _format_deadline_display(deadline_text, deadline_iso)
 
     references = [
         {"label": "Regulation", "value": "EU 2024/1689"},
         {"label": "Source repository", "value": str(repo_metadata.get("repo_url", "Not provided"))},
         {"label": "Audit ID", "value": str(audit_id)},
         {"label": "AI System ID", "value": str(ai_system_id)},
+        {"label": "Deadline", "value": deadline_display},
         {"label": "Generation timestamp", "value": generated_at.isoformat()},
     ]
 
@@ -116,6 +124,7 @@ def render_annex_iv_html(
         system_name=document.system_name,
         risk_class=risk_class,
         primary_article=primary_article,
+        deadline_display=deadline_display,
         generated_at_iso=generated_at.isoformat(),
         generated_at_display=generated_at.strftime("%d %B %Y %H:%M UTC"),
         sections=sections,
@@ -218,6 +227,13 @@ def _build_fallback_pages(
 ) -> list[list[str]]:
     """Build paginated plain-text content for the fallback PDF writer."""
 
+    deadline_text, deadline_iso = deadline_for_classification(
+        risk_class,
+        triggers_article_50=False,
+        primary_article=primary_article,
+    )
+    deadline_display = _format_deadline_display(deadline_text, deadline_iso)
+
     section_pairs = [
         ("Section 1 - General Description", document.section_1_general_description),
         ("Section 2 - Intended Purpose", document.section_2_intended_purpose),
@@ -238,6 +254,7 @@ def _build_fallback_pages(
         f"AI System ID: {ai_system_id}",
         f"Risk class: {risk_class}",
         f"Primary article: {primary_article}",
+        f"Deadline: {deadline_display}",
         f"Generated at: {generated_at.isoformat()}",
         "",
     ]
@@ -262,6 +279,7 @@ def _build_fallback_pages(
         f"Audit ID: {audit_id}",
         f"AI System ID: {ai_system_id}",
         f"Generated at: {generated_at.isoformat()}",
+        f"Deadline: {deadline_display}",
     ]
     for item in references:
         lines.extend(_wrap_text_block(f"- {item}"))
@@ -277,6 +295,14 @@ def _wrap_text_block(value: str, width: int = 92) -> list[str]:
     if not cleaned:
         return [""]
     return textwrap.wrap(cleaned, width=width, break_long_words=False, break_on_hyphens=False)
+
+
+def _format_deadline_display(deadline_text: str, deadline_iso) -> str:
+    """Prefer a clean date label when a machine-readable deadline exists."""
+
+    if deadline_iso is None:
+        return deadline_text.rstrip(".")
+    return f"{deadline_iso.day} {deadline_iso.strftime('%B %Y')}"
 
 
 def _escape_pdf_text(value: str) -> str:

@@ -36,4 +36,12 @@ Output STRICT JSON matching this schema:
 
 Be conservative: if it is clearly not an AI system, do not list it. If unsure, list it with detection_signals noting the uncertainty.
 
+Use the repository name, README content, notebook filenames and notebook text, candidate file names, and detection signals together.
+When the evidence points to a specific domain, do not emit generic names such as repository_ai_feature, generic_ai_feature, or candidate_ai_system.
+
+Important domain guardrail:
+- If the repository evidence mentions resume, CV, curriculum vitae, recruitment, hiring, candidate, applicant, screening, job matching, or talent acquisition, name the candidate specifically for that workflow.
+- Prefer names such as resume_screening_model instead of generic buckets.
+- In that case the description must explicitly say the system evaluates resumes, applicants, or candidate suitability for recruitment or hiring.
+
 Never invent file paths. Use only paths that appeared in the inputs.

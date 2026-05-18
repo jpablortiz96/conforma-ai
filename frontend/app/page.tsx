@@ -38,6 +38,12 @@ import type {
 
 const sampleRepos: SampleRepo[] = [
   {
+    label: "Resume Screening - Recruitment AI",
+    repoUrl: "https://github.com/anukalp-mishra/Resume-Screening",
+    maxFiles: 80,
+    note: "High-risk recruitment screening and CV ranking sample",
+  },
+  {
     label: "karpathy/llm.c",
     repoUrl: "https://github.com/karpathy/llm.c",
     maxFiles: 50,
@@ -271,6 +277,7 @@ function stateLabel(state: AgentPipelineItem["state"]): string {
 }
 
 export default function HomePage() {
+  const isDevelopment = process.env.NODE_ENV === "development";
   const [repoUrl, setRepoUrl] = useState<string>(sampleRepos[0].repoUrl);
   const [maxFiles, setMaxFiles] = useState<number>(sampleRepos[0].maxFiles);
   const [audit, setAudit] = useState<AuditResponse | null>(null);
@@ -694,98 +701,118 @@ export default function HomePage() {
               </p>
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  void createDemoSystem();
-                }}
-                disabled={isCreatingDemo || isAuditRunning}
-                className="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 transition hover:border-sky-300/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isCreatingDemo ? (
-                  <>
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                    Creating demo system...
-                  </>
-                ) : (
-                  "Demo high-risk system"
-                )}
-              </button>
-              <p className="text-sm text-slate-400">
-                Seeds a bank CV ranking system so you can test Annex IV generation without running a full repo audit.
-              </p>
-            </div>
-
-            {demoSystem ? (
-              <div className="mt-5 rounded-[24px] border border-sky-400/20 bg-sky-500/10 p-4 fade-rise">
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            {isDevelopment ? (
+              <details className="mt-5 rounded-[24px] border border-white/10 bg-slate-950/30 px-4 py-4 text-sm text-slate-300">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200">
-                      Demo high-risk seed ready
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      Developer sandbox
                     </p>
-                    <p className="mt-2 text-lg font-semibold text-slate-50">
-                      {demoHighRiskSeed.name}
+                    <p className="mt-1 text-sm leading-6 text-slate-300">
+                      Seed a synthetic high-risk system for Annex IV testing without running a full repository audit.
                     </p>
-                    <p className="mt-2 text-sm leading-6 text-slate-300">
-                      {demoHighRiskSeed.description}
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-300">
-                      <span className="rounded-full border border-white/10 bg-slate-950/35 px-3 py-1 font-mono">
-                        Audit {demoSystem.audit_id}
-                      </span>
-                      <span className="rounded-full border border-white/10 bg-slate-950/35 px-3 py-1 font-mono">
-                        System {demoSystem.ai_system_id}
-                      </span>
-                    </div>
                   </div>
-                  <div className="flex flex-col items-start gap-3 xl:items-end">
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                    Development only
+                  </span>
+                </summary>
+
+                <div className="mt-4 border-t border-white/10 pt-4">
+                  <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       onClick={() => {
-                        void generateDemoDocumentation();
+                        void createDemoSystem();
                       }}
-                      disabled={documentationLoadingId === demoSystem.ai_system_id}
-                      className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isCreatingDemo || isAuditRunning}
+                      className="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 transition hover:border-sky-300/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {documentationLoadingId === demoSystem.ai_system_id ? (
+                      {isCreatingDemo ? (
                         <>
                           <LoaderCircle className="h-4 w-4 animate-spin" />
-                          Generating Annex IV...
+                          Creating demo system...
                         </>
                       ) : (
-                        "Generate Annex IV PDF"
+                        "Create demo high-risk system"
                       )}
                     </button>
-                    {artifactMap[demoSystem.ai_system_id] ? (
-                      <a
-                        href={artifactMap[demoSystem.ai_system_id].download_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-sm font-semibold text-sky-100 underline decoration-sky-300/50 underline-offset-4"
-                      >
-                        Download generated Annex IV PDF
-                      </a>
-                    ) : null}
+                    <p className="text-sm text-slate-400">
+                      Seeds a bank CV ranking system for internal D4A PDF validation.
+                    </p>
                   </div>
-                </div>
-                {documentationMap[demoSystem.ai_system_id]?.message ? (
-                  <p className="mt-4 text-sm leading-6 text-slate-300">
-                    {documentationMap[demoSystem.ai_system_id].message}
-                  </p>
-                ) : null}
-                {documentationErrors[demoSystem.ai_system_id] ? (
-                  <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                    {documentationErrors[demoSystem.ai_system_id]}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
 
-            {demoError ? (
-              <div className="mt-5 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                {demoError}
-              </div>
+                  {demoSystem ? (
+                    <div className="mt-4 rounded-[24px] border border-sky-400/20 bg-sky-500/10 p-4 fade-rise">
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200">
+                            Demo high-risk seed ready
+                          </p>
+                          <p className="mt-2 text-lg font-semibold text-slate-50">
+                            {demoHighRiskSeed.name}
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-slate-300">
+                            {demoHighRiskSeed.description}
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-300">
+                            <span className="rounded-full border border-white/10 bg-slate-950/35 px-3 py-1 font-mono">
+                              Audit {demoSystem.audit_id}
+                            </span>
+                            <span className="rounded-full border border-white/10 bg-slate-950/35 px-3 py-1 font-mono">
+                              System {demoSystem.ai_system_id}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-start gap-3 xl:items-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void generateDemoDocumentation();
+                            }}
+                            disabled={documentationLoadingId === demoSystem.ai_system_id}
+                            className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {documentationLoadingId === demoSystem.ai_system_id ? (
+                              <>
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                                Generating Annex IV...
+                              </>
+                            ) : (
+                              "Generate Annex IV PDF"
+                            )}
+                          </button>
+                          {artifactMap[demoSystem.ai_system_id] ? (
+                            <a
+                              href={artifactMap[demoSystem.ai_system_id].download_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-sm font-semibold text-sky-100 underline decoration-sky-300/50 underline-offset-4"
+                            >
+                              Download generated Annex IV PDF
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                      {documentationMap[demoSystem.ai_system_id]?.message ? (
+                        <p className="mt-4 text-sm leading-6 text-slate-300">
+                          {documentationMap[demoSystem.ai_system_id].message}
+                        </p>
+                      ) : null}
+                      {documentationErrors[demoSystem.ai_system_id] ? (
+                        <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                          {documentationErrors[demoSystem.ai_system_id]}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {demoError ? (
+                    <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                      {demoError}
+                    </div>
+                  ) : null}
+                </div>
+              </details>
             ) : null}
 
             {isRunningWithoutResults ? (

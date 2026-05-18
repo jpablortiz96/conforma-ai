@@ -20,17 +20,155 @@ from app.knowledge.eu_ai_act_kb import (
     build_classifier_context,
     deadline_for_classification,
 )
-from app.schemas.agent import ClassifierInput, ClassifierRequest, ClassifierResponse
+from app.schemas.agent import (
+    ClassifierInput,
+    ClassifierRequest,
+    ClassifierResponse,
+    normalize_deadline_iso_value,
+)
 
 logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "knowledge" / "prompts" / "classifier_system.md"
+
+EMPLOYMENT_RECRUITMENT_TOKENS = (
+    "cv ranking",
+    "cv screening",
+    "curriculum vitae",
+    "resume scoring",
+    "resume screening",
+    "resume ranking",
+    "resume screen",
+    "candidate filtering",
+    "candidate scoring",
+    "candidate screening",
+    "candidate suitability",
+    "applicant scoring",
+    "applicant screening",
+    "employment screening",
+    "recruitment",
+    "recruiter",
+    "job application",
+    "job matching",
+    "talent acquisition",
+    "hiring",
+)
+CREDITWORTHINESS_TOKENS = ("credit score", "creditworthiness", "loan approval", "mortgage scoring")
+INSURANCE_RISK_TOKENS = (
+    "life insurance",
+    "health insurance",
+    "insurance premiums",
+    "insurance pricing",
+    "insurance risk pricing",
+)
+TUTORIAL_ONLY_TOKENS = (
+    "tutorial",
+    "sample project",
+    "example project",
+    "demo only",
+    "educational",
+    "for learning",
+    "generic tutorial",
+)
+RECRUITMENT_DECISION_NEGATION_TOKENS = (
+    "not used for recruitment decisions",
+    "not for recruitment decisions",
+    "not used in hiring decisions",
+    "not for real hiring decisions",
+    "for educational purposes only",
+)
+
+ANNEX_I_PRODUCT_TOKENS = (
+    "medical device",
+    "medical devices",
+    "regulated product",
+    "product safety",
+    "toy",
+    "lift",
+    "vehicle",
+    "aviation",
+)
 
 
 def _normalize_text(text: str) -> str:
     """Normalize free text for fallback matching."""
 
     return " ".join(text.lower().replace("-", " ").split())
+
+
+def _contains_any(normalized: str, tokens: tuple[str, ...]) -> bool:
+    """Return True when any token is present in the normalized text."""
+
+    return any(token in normalized for token in tokens)
+
+
+def _is_employment_recruitment_use(normalized: str) -> bool:
+    """Detect Annex III Section 4(a) recruitment and resume-screening uses."""
+
+    return _contains_any(normalized, EMPLOYMENT_RECRUITMENT_TOKENS)
+
+
+def _is_annex_i_product_embedded_use(normalized: str) -> bool:
+    """Detect Annex I product-embedded safety-component uses."""
+
+    return "safety component" in normalized and _contains_any(normalized, ANNEX_I_PRODUCT_TOKENS)
+
+
+def _is_tutorial_only_recruitment_example(normalized: str) -> bool:
+    """Avoid high-risk overrides when the text clearly says it is only a tutorial."""
+
+    return _contains_any(normalized, TUTORIAL_ONLY_TOKENS) and _contains_any(
+        normalized,
+        RECRUITMENT_DECISION_NEGATION_TOKENS,
+    )
+
+
+def _force_high_risk_outcome(
+    response: ClassifierResponse,
+    *,
+    primary_article: str,
+    reasoning: str,
+    triggers_article_50: bool,
+    secondary_articles: list[str] | None = None,
+) -> ClassifierResponse:
+    """Apply a deterministic high-risk override with normalized deadlines."""
+
+    response.risk_class = "HIGH_RISK"
+    response.primary_article = primary_article
+    response.triggers_article_50 = triggers_article_50
+    response.secondary_articles = list(secondary_articles or [])
+    deadline, deadline_iso = deadline_for_classification(
+        "HIGH_RISK",
+        triggers_article_50=triggers_article_50,
+        primary_article=primary_article,
+    )
+    response.deadline = deadline
+    response.deadline_iso = deadline_iso
+    if response.confidence < 0.9:
+        response.confidence = 0.9
+    if reasoning not in response.reasoning:
+        response.reasoning = f"{reasoning} {response.reasoning}".strip()
+    return response
+
+
+def _append_high_risk_deadline_note(response: ClassifierResponse) -> None:
+    """Append the correct Omnibus deadline note for high-risk systems."""
+
+    annex_i_deadline_note = "The Annex I product-embedded high-risk deadline is 2 August 2028."
+    annex_iii_deadline_note = (
+        "The Annex III high-risk deadline is 2 December 2027, postponed from 2 August 2026 "
+        "by the Digital Omnibus deal of 7 May 2026."
+    )
+    is_annex_i_reference = response.primary_article == "Annex I" or response.primary_article.startswith("Annex I ")
+    deadline_note = annex_i_deadline_note if is_annex_i_reference else annex_iii_deadline_note
+    reasoning_lower = response.reasoning.lower()
+    if is_annex_i_reference:
+        already_mentions_deadline = "2 august 2028" in reasoning_lower
+    else:
+        already_mentions_deadline = "2 december 2027" in reasoning_lower
+
+    if deadline_note not in response.reasoning and not already_mentions_deadline:
+        response.reasoning = f"{response.reasoning.rstrip()} {deadline_note}"
 
 
 def _ensure_article(
@@ -53,21 +191,53 @@ def _ensure_article(
             response.primary_article = "Article 5(1)(h)"
         response.secondary_articles = []
         response.triggers_article_50 = False
+    elif _is_employment_recruitment_use(normalized) and not _is_tutorial_only_recruitment_example(normalized):
+        triggers_article_50 = response.triggers_article_50 or "explanation" in normalized
+        secondary_articles = list(response.secondary_articles)
+        if triggers_article_50 and "Article 50(2)" not in secondary_articles:
+            secondary_articles.append("Article 50(2)")
+        response = _force_high_risk_outcome(
+            response,
+            primary_article="Annex III Section 4(a)",
+            reasoning=(
+                "Deterministic guardrail: the combined evidence describes resume, CV, applicant, or candidate "
+                "screening for recruitment or hiring, which maps to Annex III Section 4(a)."
+            ),
+            triggers_article_50=triggers_article_50,
+            secondary_articles=secondary_articles,
+        )
+    elif _is_annex_i_product_embedded_use(normalized):
+        response = _force_high_risk_outcome(
+            response,
+            primary_article="Annex I",
+            reasoning=(
+                "Deterministic guardrail: the description places the AI system inside a regulated product safety "
+                "component, so Annex I product-embedded high-risk obligations apply."
+            ),
+            triggers_article_50=False,
+        )
+    elif _contains_any(normalized, INSURANCE_RISK_TOKENS):
+        response = _force_high_risk_outcome(
+            response,
+            primary_article="Annex III Section 5(c)",
+            reasoning=(
+                "Deterministic guardrail: life or health insurance risk assessment and pricing map to "
+                "Annex III Section 5(c)."
+            ),
+            triggers_article_50=False,
+        )
+    elif _contains_any(normalized, CREDITWORTHINESS_TOKENS):
+        response = _force_high_risk_outcome(
+            response,
+            primary_article="Annex III Section 5(b)",
+            reasoning=(
+                "Deterministic guardrail: creditworthiness, credit scoring, or loan-approval use maps to "
+                "Annex III Section 5(b)."
+            ),
+            triggers_article_50=False,
+        )
     elif response.risk_class == "HIGH_RISK":
-        if any(
-            token in normalized
-            for token in ("cv ranking", "resume scoring", "resume ranking", "candidate filtering", "recruitment", "job application", "hiring")
-        ):
-            response.primary_article = "Annex III Section 4(a)"
-            if "explanation" in normalized:
-                response.triggers_article_50 = True
-                if "Article 50(2)" not in response.secondary_articles:
-                    response.secondary_articles.append("Article 50(2)")
-        elif any(token in normalized for token in ("life insurance", "health insurance", "insurance premiums", "insurance pricing")):
-            response.primary_article = "Annex III Section 5(c)"
-        elif any(token in normalized for token in ("credit score", "creditworthiness", "loan approval", "mortgage scoring")):
-            response.primary_article = "Annex III Section 5(b)"
-        elif any(token in normalized for token in ("facial recognition", "face recognition", "shoplifter", "supermarket", "retail")):
+        if any(token in normalized for token in ("facial recognition", "face recognition", "shoplifter", "supermarket", "retail")):
             response.primary_article = "Annex III Section 1"
         deadline, deadline_iso = deadline_for_classification(
             "HIGH_RISK",
@@ -76,11 +246,7 @@ def _ensure_article(
         )
         response.deadline = deadline
         response.deadline_iso = deadline_iso
-        if "Digital Omnibus deal of 7 May 2026" not in response.reasoning:
-            response.reasoning = (
-                f"{response.reasoning.rstrip()} The Annex III deadline is 2 December 2027, postponed from "
-                "2 August 2026 by the Digital Omnibus deal of 7 May 2026."
-            )
+        _append_high_risk_deadline_note(response)
     elif response.risk_class == "LIMITED_RISK":
         if any(token in normalized for token in ("chatbot", "password reset", "customer service bot", "virtual assistant")):
             response.primary_article = "Article 50(1)"
@@ -117,6 +283,8 @@ def _ensure_article(
         if item not in deduped:
             deduped.append(item)
     response.secondary_articles = deduped
+    if response.risk_class == "HIGH_RISK":
+        _append_high_risk_deadline_note(response)
     return response
 
 
@@ -134,7 +302,7 @@ def classify_with_fallback(system_description: str) -> ClassifierResponse:
                 triggers_article_50=rule.triggers_article_50,
                 primary_article=rule.primary_article,
             )
-            return ClassifierResponse(
+            response = ClassifierResponse(
                 risk_class=rule.risk_class,
                 primary_article=rule.primary_article,
                 secondary_articles=list(rule.secondary_articles),
@@ -145,13 +313,14 @@ def classify_with_fallback(system_description: str) -> ClassifierResponse:
                 triggers_article_50=rule.triggers_article_50,
                 mode="fallback",
             )
+            return _ensure_article(response, system_description=system_description)
 
     deadline, deadline_iso = deadline_for_classification(
         "MINIMAL_RISK",
         triggers_article_50=False,
         primary_article="Not applicable",
     )
-    return ClassifierResponse(
+    response = ClassifierResponse(
         risk_class="MINIMAL_RISK",
         primary_article="Not applicable",
         secondary_articles=[],
@@ -166,6 +335,7 @@ def classify_with_fallback(system_description: str) -> ClassifierResponse:
         triggers_article_50=False,
         mode="fallback",
     )
+    return _ensure_article(response, system_description=system_description)
 
 
 def build_classifier_prompt(system_description: str, context_files: list[str]) -> str:
@@ -235,6 +405,7 @@ class ClassifierAgent(BaseAgent):
         )
 
         try:
+            response.deadline_iso = normalize_deadline_iso_value(response.deadline_iso)
             ai_system.risk_class = response.risk_class
             ai_system.primary_article = response.primary_article
             ai_system.secondary_articles = response.secondary_articles

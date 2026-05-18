@@ -44,6 +44,36 @@ SECTION_GAP_HINTS = {
     "section_9_post_market_monitoring": "Post-market monitoring, serious-incident reporting, and risk reassessment procedures are not documented in the repository.",
 }
 
+EMPLOYMENT_RECRUITMENT_TOKENS = (
+    "cv ranking",
+    "cv screening",
+    "resume scoring",
+    "resume screening",
+    "resume ranking",
+    "resume screen",
+    "candidate filtering",
+    "candidate scoring",
+    "candidate screening",
+    "applicant scoring",
+    "applicant screening",
+    "employment screening",
+    "recruitment",
+    "recruiter",
+    "job application",
+    "hiring",
+)
+
+ANNEX_I_PRODUCT_TOKENS = (
+    "medical device",
+    "medical devices",
+    "regulated product",
+    "product safety",
+    "toy",
+    "lift",
+    "vehicle",
+    "aviation",
+)
+
 
 def _dedupe(values: list[str]) -> list[str]:
     """Return a stable de-duplicated list of non-empty strings."""
@@ -56,6 +86,33 @@ def _dedupe(values: list[str]) -> list[str]:
             seen.add(cleaned)
             result.append(cleaned)
     return result
+
+
+def _normalize_text(text: str) -> str:
+    """Normalize free text for lightweight legal article correction."""
+
+    return " ".join(text.lower().replace("-", " ").split())
+
+
+def _normalize_high_risk_primary_article(
+    *,
+    system_name: str,
+    system_description: str,
+    current_primary_article: str,
+) -> str:
+    """Correct common high-risk article drift before Annex IV generation."""
+
+    normalized = _normalize_text(f"{system_name} {system_description}")
+
+    if any(token in normalized for token in EMPLOYMENT_RECRUITMENT_TOKENS):
+        return "Annex III Section 4(a)"
+
+    if "safety component" in normalized and any(
+        token in normalized for token in ANNEX_I_PRODUCT_TOKENS
+    ):
+        return "Annex I"
+
+    return sanitize_reference_text(current_primary_article)
 
 
 def _short_join(values: list[str], *, fallback: str, limit: int = 6) -> str:
@@ -252,8 +309,10 @@ class DocumentationAgent(BaseAgent):
             )
 
         effective_risk_class = (ai_system.risk_class or validated.risk_class).upper()
-        effective_primary_article = sanitize_reference_text(
-            ai_system.primary_article or validated.primary_article
+        effective_primary_article = _normalize_high_risk_primary_article(
+            system_name=ai_system.name,
+            system_description=validated.system_description,
+            current_primary_article=ai_system.primary_article or validated.primary_article,
         )
 
         if effective_risk_class != "HIGH_RISK":

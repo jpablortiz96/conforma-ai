@@ -51,6 +51,12 @@ README_SIGNAL_MAP = {
     "dialogue": "README mentions dialogue systems",
     "llm": "README mentions LLM behavior",
 }
+DOMAIN_KEYWORD_GROUPS = (
+    (("resume", "cv", "curriculum vitae"), "resume or CV workflows"),
+    (("recruitment", "hiring", "talent acquisition", "job matching"), "recruitment or hiring workflows"),
+    (("candidate", "applicant"), "candidate or applicant evaluation"),
+    (("screening",), "screening workflows"),
+)
 SKIP_DIR_NAMES = {
     ".git",
     ".venv",
@@ -84,6 +90,7 @@ class RepoInspection:
     candidate_files: list[CandidateFile]
     dependency_signals: list[str]
     readme_signals: list[str]
+    domain_signals: list[str]
     truncated: bool
 
 
@@ -147,11 +154,22 @@ def _extract_readme_signals(path: Path, text: str) -> list[str]:
     for keyword, message in README_SIGNAL_MAP.items():
         if keyword in lower_text:
             signals.append(f"README signal: {path.name} {message.lower()}")
+    signals.extend(_extract_domain_signals(path.name, text, verb="mentions"))
+    return signals
+
+
+def _extract_domain_signals(source_label: str, text: str, *, verb: str) -> list[str]:
+    normalized_text = text.lower().replace("_", " ").replace("-", " ")
+    signals: list[str] = []
+    for keywords, label in DOMAIN_KEYWORD_GROUPS:
+        if any(keyword in normalized_text for keyword in keywords):
+            signals.append(f"domain signal: {source_label} {verb} {label}")
     return signals
 
 
 def _extract_code_signals(path: Path, text: str) -> list[str]:
     lower_text = text.lower()
+    lower_path = path.as_posix().lower().replace("_", " ").replace("-", " ")
     signals: list[str] = []
     for dependency in sorted(DEPENDENCY_KEYWORDS):
         if f"import {dependency}" in lower_text or f"from {dependency}" in lower_text:
@@ -164,6 +182,11 @@ def _extract_code_signals(path: Path, text: str) -> list[str]:
         signals.append(f"file signal: {path.as_posix()} matched *inference*.py")
     if any(part.lower() in AI_DIRECTORY_NAMES for part in path.parts):
         signals.append(f"file signal: {path.as_posix()} is under an AI model directory")
+    signals.extend(_extract_domain_signals(path.as_posix(), f"{path.as_posix()} {text}", verb="suggests"))
+    if any(keyword in lower_path for keyword in ("resume", "cv", "curriculum vitae")) and any(
+        keyword in lower_path for keyword in ("screen", "rank", "recruit", "candidate", "applicant")
+    ):
+        signals.append(f"file signal: {path.as_posix()} suggests resume screening workflow")
     return signals
 
 
@@ -197,6 +220,7 @@ def collect_candidate_artifacts(
     scored_candidates: list[tuple[int, CandidateFile]] = []
     dependency_signals: list[str] = []
     readme_signals: list[str] = []
+    domain_signals: list[str] = []
 
     for path in discovered_files:
         matched, reason, score = _path_matches_candidate(path.relative_to(repo_root))
@@ -211,6 +235,8 @@ def collect_candidate_artifacts(
                 dependency_signals.append(signal)
             if signal.startswith("README signal:") and signal not in readme_signals:
                 readme_signals.append(signal)
+            if signal.startswith("domain signal:") and signal not in domain_signals:
+                domain_signals.append(signal)
 
     scored_candidates.sort(key=lambda item: (-item[0], item[1].path))
     truncated = len(scored_candidates) > max_files_to_inspect
@@ -222,5 +248,6 @@ def collect_candidate_artifacts(
         candidate_files=candidate_files,
         dependency_signals=dependency_signals[:20],
         readme_signals=readme_signals[:20],
+        domain_signals=domain_signals[:20],
         truncated=truncated,
     )

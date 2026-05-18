@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -23,6 +24,40 @@ from app.services.repo_cloner import ClonedRepo, cleanup_clone, shallow_clone
 logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "knowledge" / "prompts" / "scanner_system.md"
+RECRUITMENT_DOMAIN_TOKENS = (
+    "resume",
+    "cv",
+    "curriculum vitae",
+    "recruitment",
+    "hiring",
+    "candidate",
+    "applicant",
+    "screening",
+    "job matching",
+    "talent acquisition",
+)
+GENERIC_CANDIDATE_NAMES = {
+    "repository_ai_feature",
+    "generic_ai_feature",
+    "candidate_ai_system",
+    "ai_system_candidate",
+}
+
+
+def _normalize_text(value: str) -> str:
+    """Normalize text for deterministic signal matching."""
+
+    return " ".join(value.lower().replace("-", " ").replace("_", " ").split())
+
+
+def _repo_name_from_url(repo_url: str) -> str:
+    """Extract the repository slug from a public Git URL."""
+
+    path = urlparse(repo_url).path.strip("/")
+    if not path:
+        return "repository"
+    name = path.rsplit("/", 1)[-1]
+    return name.removesuffix(".git") or "repository"
 
 
 class ScannerAgent(BaseAgent):
@@ -72,6 +107,8 @@ class ScannerAgent(BaseAgent):
                     fallback_output = self._build_fallback_inventory(validated, inspection)
                     mode = "fallback"
                     model_name = "fallback-heuristics"
+
+            fallback_output = self._post_process_inventory(validated, inspection, fallback_output)
 
             ai_system_rows: list[AISystem] = []
             for candidate in fallback_output.ai_systems_found:
@@ -174,10 +211,12 @@ class ScannerAgent(BaseAgent):
         prompt_candidates = inspection.candidate_files[:60]
         prompt_payload = {
             "repo_url": scanner_input.repo_url,
+            "repo_name": _repo_name_from_url(scanner_input.repo_url),
             "files_inspected": inspection.files_inspected,
             "truncated": inspection.truncated,
             "dependency_signals": inspection.dependency_signals,
             "readme_signals": inspection.readme_signals,
+            "domain_signals": inspection.domain_signals,
             "candidate_files": [
                 {
                     "path": candidate.path,
@@ -207,14 +246,22 @@ class ScannerAgent(BaseAgent):
         evidence_text = " ".join(
             [
                 scanner_input.repo_url.lower(),
+                _repo_name_from_url(scanner_input.repo_url).lower(),
                 *inspection.dependency_signals,
                 *inspection.readme_signals,
+                *inspection.domain_signals,
                 *[candidate.path.lower() for candidate in inspection.candidate_files],
                 *[candidate.excerpt.lower() for candidate in inspection.candidate_files[:20]],
             ]
         )
 
-        if "rasa" in evidence_text or "chatbot" in evidence_text or "dialogue" in evidence_text:
+        if self._has_recruitment_domain_signals(scanner_input, inspection, None):
+            candidates = [self._build_recruitment_candidate(scanner_input, inspection)]
+            summary = (
+                "The repository exposes a recruitment-oriented AI workflow with strong signals from the "
+                "repository name, README guidance, and candidate files that point to resume or applicant screening."
+            )
+        elif "rasa" in evidence_text or "chatbot" in evidence_text or "dialogue" in evidence_text:
             candidates = [
                 self._candidate_from_paths(
                     "conversational_nlu_pipeline",
@@ -307,6 +354,170 @@ class ScannerAgent(BaseAgent):
             ]
 
         return ScannerGeminiOutput(ai_systems_found=candidates, summary=summary)
+
+    def _post_process_inventory(
+        self,
+        scanner_input: ScannerInput,
+        inspection: RepoInspection,
+        inventory: ScannerGeminiOutput,
+    ) -> ScannerGeminiOutput:
+        """Replace vague candidates when the repository evidence already points to a specific domain."""
+
+        if not self._has_recruitment_domain_signals(scanner_input, inspection, inventory):
+            return inventory
+
+        enriched_candidate = self._build_recruitment_candidate(scanner_input, inspection)
+        candidates = list(inventory.ai_systems_found)
+
+        for index, candidate in enumerate(candidates):
+            if self._candidate_mentions_recruitment(candidate) or candidate.name in GENERIC_CANDIDATE_NAMES:
+                candidates[index] = self._merge_candidate(candidate, enriched_candidate)
+                break
+        else:
+            candidates.insert(0, enriched_candidate)
+
+        summary = inventory.summary
+        if "recruit" not in _normalize_text(summary) and "resume" not in _normalize_text(summary):
+            summary = (
+                "The repository contains a recruitment-oriented AI system for resume or applicant screening. "
+                f"{inventory.summary}"
+            )
+
+        return ScannerGeminiOutput(ai_systems_found=candidates, summary=summary)
+
+    def _has_recruitment_domain_signals(
+        self,
+        scanner_input: ScannerInput,
+        inspection: RepoInspection,
+        inventory: ScannerGeminiOutput | None,
+    ) -> bool:
+        """Return True when repository evidence points to resume or recruitment screening."""
+
+        evidence_parts = [
+            scanner_input.repo_url,
+            _repo_name_from_url(scanner_input.repo_url),
+            *inspection.domain_signals,
+            *inspection.readme_signals,
+            *inspection.dependency_signals,
+            *[candidate.path for candidate in inspection.candidate_files],
+            *[candidate.excerpt for candidate in inspection.candidate_files[:20]],
+        ]
+        if inventory is not None:
+            for candidate in inventory.ai_systems_found:
+                evidence_parts.extend(
+                    [
+                        candidate.name,
+                        candidate.description,
+                        *candidate.source_files,
+                        *candidate.detection_signals,
+                    ]
+                )
+        normalized = _normalize_text(" ".join(evidence_parts))
+        return any(token in normalized for token in RECRUITMENT_DOMAIN_TOKENS)
+
+    def _candidate_mentions_recruitment(self, candidate: AISystemCandidate) -> bool:
+        """Check whether a Gemini candidate already carries recruitment evidence."""
+
+        normalized = _normalize_text(
+            " ".join(
+                [
+                    candidate.name,
+                    candidate.description,
+                    *candidate.source_files,
+                    *candidate.detection_signals,
+                ]
+            )
+        )
+        return any(token in normalized for token in RECRUITMENT_DOMAIN_TOKENS)
+
+    def _build_recruitment_candidate(
+        self,
+        scanner_input: ScannerInput,
+        inspection: RepoInspection,
+    ) -> AISystemCandidate:
+        """Construct a specific resume-screening candidate from repository evidence."""
+
+        return AISystemCandidate(
+            name="resume_screening_model",
+            description=(
+                "A machine learning system designed to automate resume screening for recruitment by "
+                "evaluating applicant resumes, candidate suitability, and hiring-related evidence before "
+                "human reviewers make employment decisions."
+            ),
+            source_files=self._select_recruitment_source_files(inspection),
+            detection_signals=self._build_recruitment_detection_signals(scanner_input, inspection),
+        )
+
+    def _select_recruitment_source_files(self, inspection: RepoInspection) -> list[str]:
+        """Select the most relevant source files for recruitment-focused evidence."""
+
+        matching_files = [
+            candidate.path
+            for candidate in inspection.candidate_files
+            if any(token in _normalize_text(f"{candidate.path} {candidate.excerpt}") for token in RECRUITMENT_DOMAIN_TOKENS)
+        ]
+        if not matching_files:
+            matching_files = [candidate.path for candidate in inspection.candidate_files[:6]]
+
+        deduped: list[str] = []
+        for path in matching_files:
+            if path not in deduped:
+                deduped.append(path)
+        return deduped[:6]
+
+    def _build_recruitment_detection_signals(
+        self,
+        scanner_input: ScannerInput,
+        inspection: RepoInspection,
+    ) -> list[str]:
+        """Build a stable evidence trail for recruitment-oriented AI repositories."""
+
+        repo_name = _repo_name_from_url(scanner_input.repo_url)
+        normalized_repo_name = _normalize_text(repo_name)
+        signals: list[str] = []
+
+        if any(token in normalized_repo_name for token in RECRUITMENT_DOMAIN_TOKENS):
+            signals.append(f"repository signal: repository name contains {repo_name}")
+
+        for collection in (
+            inspection.readme_signals,
+            inspection.domain_signals,
+            [signal for candidate in inspection.candidate_files for signal in candidate.signals],
+        ):
+            for signal in collection:
+                normalized_signal = _normalize_text(signal)
+                if any(token in normalized_signal for token in RECRUITMENT_DOMAIN_TOKENS) or (
+                    signal.startswith("README signal:") and "machine learning" in normalized_signal
+                ):
+                    if signal not in signals:
+                        signals.append(signal)
+
+        return signals[:8]
+
+    def _merge_candidate(
+        self,
+        original: AISystemCandidate,
+        enriched: AISystemCandidate,
+    ) -> AISystemCandidate:
+        """Merge Gemini candidate data with deterministic recruitment evidence."""
+
+        candidate_name = original.name
+        if original.name in GENERIC_CANDIDATE_NAMES:
+            candidate_name = enriched.name
+
+        description = original.description
+        if original.name in GENERIC_CANDIDATE_NAMES or not self._candidate_mentions_recruitment(original):
+            description = enriched.description
+
+        source_files = list(dict.fromkeys([*original.source_files, *enriched.source_files]))[:6]
+        detection_signals = list(dict.fromkeys([*original.detection_signals, *enriched.detection_signals]))[:8]
+
+        return AISystemCandidate(
+            name=candidate_name,
+            description=description,
+            source_files=source_files,
+            detection_signals=detection_signals,
+        )
 
     def _candidate_from_paths(
         self,

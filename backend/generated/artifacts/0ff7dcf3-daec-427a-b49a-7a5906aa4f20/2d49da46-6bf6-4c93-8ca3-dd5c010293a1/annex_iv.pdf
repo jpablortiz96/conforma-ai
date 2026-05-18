@@ -1,0 +1,280 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 2842 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(Annex IV Technical Documentation) Tj
+T*
+(bank_cv_ranking_system) Tj
+T*
+() Tj
+T*
+(Audit ID: 0ff7dcf3-daec-427a-b49a-7a5906aa4f20) Tj
+T*
+(AI System ID: 2d49da46-6bf6-4c93-8ca3-dd5c010293a1) Tj
+T*
+(Risk class: HIGH_RISK) Tj
+T*
+(Primary article: Annex III Section 4\(a\)) Tj
+T*
+(Generated at: 2026-05-16T23:51:38.250721+00:00) Tj
+T*
+() Tj
+T*
+(Section 1 - General Description) Tj
+T*
+(The bank_cv_ranking_system is an AI system designed to rank curriculum vitae \(CVs\) for) Tj
+T*
+(recruitment purposes within a banking context. The system architecture includes a ranking) Tj
+T*
+(module located at src/recruitment/ranker.py, as evidenced by the repository contents. [GAP -) Tj
+T*
+(information not available in repository. Provider must document.] Provider information,) Tj
+T*
+(hardware and software requirements, and the specific market form are not evidenced in the) Tj
+T*
+(repository.) Tj
+T*
+() Tj
+T*
+(Section 2 - Intended Purpose) Tj
+T*
+(The intended purpose of the bank_cv_ranking_system is to rank CVs for recruitment in a bank) Tj
+T*
+(using education, employment history, skills, and interview notes. The system evaluates) Tj
+T*
+(applicants to assist in recruiter review. [GAP - information not available in repository.) Tj
+T*
+(Provider must document.] Detailed documentation regarding foreseeable misuse and the) Tj
+T*
+(specific demographic profiles of affected natural persons is missing.) Tj
+T*
+() Tj
+T*
+(Section 3 - Human Oversight Measures) Tj
+T*
+(The system evaluates applicants specifically for recruiter review, indicating a) Tj
+T*
+(human-in-the-loop oversight mechanism where human recruiters interpret the AI-generated) Tj
+T*
+(rankings. [GAP - information not available in repository. Provider must document.] Detailed) Tj
+T*
+(instructions on the capabilities and limitations of the system, as well as specific) Tj
+T*
+(oversight mechanisms implemented to prevent automation bias by the deployer, are not) Tj
+T*
+(provided.) Tj
+T*
+() Tj
+T*
+(Section 4 - Input Data Specifications) Tj
+T*
+(The system processes input data consisting of candidate education, employment history,) Tj
+T*
+(skills, and interview notes. [GAP - information not available in repository. Provider must) Tj
+T*
+(document.] Specifications regarding training data, validation data, test data, data) Tj
+T*
+(provenance, and data quality controls are entirely absent from the repository.) Tj
+T*
+() Tj
+T*
+(Section 5 - Design Specifications) Tj
+T*
+(The system's design includes a ranking component implemented in src/recruitment/ranker.py.) Tj
+T*
+([GAP - information not available in repository. Provider must document.] Detailed) Tj
+T*
+(architectural diagrams, key design choices, algorithmic logic, and the classification) Tj
+T*
+(rationale are not documented in the repository.) Tj
+T*
+() Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 1) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 3062 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(Section 6 - Risk Management System) Tj
+T*
+([GAP - information not available in repository. Provider must document.] The repository) Tj
+T*
+(contains no evidence of a risk management system. Documentation regarding identified risks,) Tj
+T*
+(risk estimation, and mitigation measures is missing.) Tj
+T*
+() Tj
+T*
+(Section 7 - Validation and Testing) Tj
+T*
+([GAP - information not available in repository. Provider must document.] There is no) Tj
+T*
+(evidence of validation and testing procedures in the repository. Test methodology, test) Tj
+T*
+(datasets, discriminatory bias testing \(crucial for Annex III Section 4\(a\) high-risk) Tj
+T*
+(systems\), and test results are not documented.) Tj
+T*
+() Tj
+T*
+(Section 8 - Performance Metrics) Tj
+T*
+([GAP - information not available in repository. Provider must document.] The repository) Tj
+T*
+(lacks documentation on performance metrics. Information regarding system accuracy,) Tj
+T*
+(robustness, cybersecurity measures, and performance trade-offs is missing.) Tj
+T*
+() Tj
+T*
+(Section 9 - Post-Market Monitoring) Tj
+T*
+([GAP - information not available in repository. Provider must document.] No post-market) Tj
+T*
+(monitoring plan is evidenced in the repository. The provider must document the monitoring) Tj
+T*
+(system, risk reassessment plan, and incident reporting procedure.) Tj
+T*
+() Tj
+T*
+(Appendix A - Gaps Identified) Tj
+T*
+(- Provider information, hardware and software requirements, and market form.) Tj
+T*
+(- Foreseeable misuse and detailed profiles of affected natural persons.) Tj
+T*
+(- Capabilities, limitations, and detailed human oversight instructions.) Tj
+T*
+(- Training, validation, and test data specifications, including data provenance and quality) Tj
+T*
+(controls.) Tj
+T*
+(- Detailed architectural design choices and classification rationale.) Tj
+T*
+(- Risk management system, including identified risks, estimation, and mitigation measures.) Tj
+T*
+(- Validation and testing documentation, including discriminatory bias testing and test) Tj
+T*
+(results.) Tj
+T*
+(- Performance metrics including accuracy, robustness, and cybersecurity.) Tj
+T*
+(- Post-market monitoring system, risk reassessment plan, and incident reporting procedure.) Tj
+T*
+(- Provider identity, versioning, hardware dependencies, and market form are not fully) Tj
+T*
+(evidenced in the repository.) Tj
+T*
+(- Affected natural-person categories, intended users, and foreseeable misuse are not fully) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Human oversight procedures, escalation paths, and output interpretation guidance are not) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Dataset provenance, labeling, cleaning, validation data, and data-quality controls are not) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Formal architecture rationale, lifecycle change controls, and standards mapping are not) Tj
+T*
+(fully documented in the repository.) Tj
+T*
+(- The Article 9 risk-management process and provider-owned control register are not) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 2) Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 819 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(documented in the repository.) Tj
+T*
+(- Validation datasets, bias testing evidence, and documented test results are not present in) Tj
+T*
+(the repository.) Tj
+T*
+(- Accuracy, robustness, cybersecurity, and trade-off metrics are not evidenced in the) Tj
+T*
+(repository.) Tj
+T*
+(- Post-market monitoring, serious-incident reporting, and risk reassessment procedures are) Tj
+T*
+(not documented in the repository.) Tj
+T*
+() Tj
+T*
+(Appendix B - References) Tj
+T*
+(- Regulation EU 2024/1689) Tj
+T*
+(- Source repository: https://github.com/demo/bank-cv-ranking-system) Tj
+T*
+(- Audit ID: 0ff7dcf3-daec-427a-b49a-7a5906aa4f20) Tj
+T*
+(- AI System ID: 2d49da46-6bf6-4c93-8ca3-dd5c010293a1) Tj
+T*
+(- Generated at: 2026-05-16T23:51:38.250721+00:00) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 3) Tj
+ET
+endstream
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000133 00000 n 
+0000000203 00000 n 
+0000000329 00000 n 
+0000003223 00000 n 
+0000003349 00000 n 
+0000006463 00000 n 
+0000006589 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+7459
+%%EOF

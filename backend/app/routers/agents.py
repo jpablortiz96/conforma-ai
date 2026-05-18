@@ -6,6 +6,7 @@ import logging
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.classifier import classify_description
@@ -56,18 +57,19 @@ async def scan_repository(
     agent = ScannerAgent(db)
     try:
         result = await agent.run(request.model_dump(mode="json"), audit.id)
+        normalized_result = ScannerOutput.model_validate(result)
         audit.status = "completed"
         audit.completed_at = datetime.now(timezone.utc)
         db.add(audit)
         await db.commit()
-        return ScannerOutput.model_validate(result)
+        return normalized_result
     except RepositoryCloneError as exc:
         audit.status = "failed"
         audit.completed_at = datetime.now(timezone.utc)
         db.add(audit)
         await db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except ScannerValidationError as exc:
+    except (ScannerValidationError, ValidationError) as exc:
         audit.status = "failed"
         audit.completed_at = datetime.now(timezone.utc)
         db.add(audit)
@@ -75,6 +77,16 @@ async def scan_repository(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ScannerExecutionError as exc:
         logger.exception("Scanner execution failed for audit %s", audit.id)
+        audit.status = "failed"
+        audit.completed_at = datetime.now(timezone.utc)
+        db.add(audit)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Scanner execution failed. Check server logs for details.",
+        ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected scanner route failure for audit %s", audit.id)
         audit.status = "failed"
         audit.completed_at = datetime.now(timezone.utc)
         db.add(audit)

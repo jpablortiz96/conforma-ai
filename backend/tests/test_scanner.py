@@ -84,6 +84,34 @@ def _build_demo_repo(repo_root: Path) -> Path:
     return repo_path
 
 
+def _build_resume_screening_repo(repo_root: Path) -> Path:
+    repo_path = repo_root / "Resume-Screening"
+    (repo_path / "src" / "resume_screening").mkdir(parents=True)
+    (repo_path / "README.md").write_text(
+        (
+            "# Resume Screening\n\n"
+            "Machine learning project for resume screening in recruitment workflows.\n"
+            "The notebook evaluates applicant resumes, candidate suitability, and hiring-related skills.\n"
+        ),
+        encoding="utf-8",
+    )
+    (repo_path / "requirements.txt").write_text(
+        "scikit-learn\npandas\nnumpy\n", encoding="utf-8"
+    )
+    (repo_path / "Resume_Screening.ipynb").write_text(
+        (
+            '{"cells":[{"cell_type":"markdown","source":["Resume screening for recruitment and candidate ranking."]},'
+            '{"cell_type":"code","source":["# applicant screening workflow\\n"]}],"metadata":{},"nbformat":4,"nbformat_minor":5}'
+        ),
+        encoding="utf-8",
+    )
+    (repo_path / "src" / "resume_screening" / "model.py").write_text(
+        "from sklearn.ensemble import RandomForestClassifier\n# score applicant resumes for hiring teams\n",
+        encoding="utf-8",
+    )
+    return repo_path
+
+
 @pytest.mark.asyncio
 async def test_scanner_agent_uses_gemini_output_when_available(
     monkeypatch: pytest.MonkeyPatch,
@@ -203,3 +231,106 @@ def test_scanner_endpoint_fallback_persists_inventory_and_cleans_up(
     assert len(fake_db.records["agent_runs"]) == 1
     assert cleanup_calls
     assert not repo_root.exists()
+
+
+@pytest.mark.asyncio
+async def test_scanner_fallback_avoids_generic_candidate_for_resume_screening_repo(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Recruitment-heavy repository evidence should produce a specific resume-screening candidate."""
+
+    fake_db = FakeAsyncSession()
+    repo_root = tmp_path / "clone"
+    repo_path = _build_resume_screening_repo(repo_root)
+    cleanup_calls: list[Path] = []
+
+    async def fake_shallow_clone(repo_url: str) -> ClonedRepo:
+        return ClonedRepo(temp_dir=repo_root, repo_path=repo_path)
+
+    async def fake_cleanup_clone(cloned_repo: ClonedRepo | Path | str | None) -> None:
+        if cloned_repo is None:
+            return
+        target = cloned_repo.temp_dir if isinstance(cloned_repo, ClonedRepo) else Path(cloned_repo)
+        cleanup_calls.append(target)
+        shutil.rmtree(target, ignore_errors=True)
+
+    async def failing_call_flash_json(prompt: str, temperature: float = 0.0) -> dict[str, object]:
+        raise GeminiClientError("forced fallback")
+
+    monkeypatch.setattr("app.agents.scanner.shallow_clone", fake_shallow_clone)
+    monkeypatch.setattr("app.agents.scanner.cleanup_clone", fake_cleanup_clone)
+    monkeypatch.setattr("app.agents.scanner.call_flash_json", failing_call_flash_json)
+
+    agent = ScannerAgent(fake_db)
+    result = await agent.run(
+        {
+            "repo_url": "https://github.com/anukalp-mishra/Resume-Screening",
+            "max_files_to_inspect": 80,
+        },
+        audit_id=uuid4(),
+    )
+
+    assert result["mode"] == "fallback"
+    assert result["ai_systems_found"]
+    candidate = result["ai_systems_found"][0]
+    assert candidate["name"] == "resume_screening_model"
+    assert candidate["name"] != "repository_ai_feature"
+    assert "recruit" in candidate["description"].lower()
+    assert any("repository name contains Resume-Screening" in signal for signal in candidate["detection_signals"])
+    assert any("machine learning" in signal.lower() for signal in candidate["detection_signals"])
+    assert any(
+        "resume screening workflow" in signal.lower() or "resume or cv workflows" in signal.lower()
+        for signal in candidate["detection_signals"]
+    )
+    assert cleanup_calls
+    assert not repo_root.exists()
+
+
+def test_scanner_endpoint_returns_422_for_invalid_agent_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scanner route should not leak a 500 when the final payload is malformed."""
+
+    fake_db = FakeAsyncSession()
+
+    async def override_get_db():
+        yield fake_db
+
+    async def fake_scanner_run(self, input_data, audit_id):
+        return {
+            "audit_id": audit_id,
+            "repo_url": input_data["repo_url"],
+            "files_inspected": 4,
+            "ai_systems_found": [
+                {
+                    "id": str(uuid4()),
+                    "name": "resume_screening_model",
+                    # Missing description on purpose to trigger response validation.
+                    "source_files": ["src/model.py"],
+                    "detection_signals": ["README signal: README mentions recruitment screening"],
+                }
+            ],
+            "summary": "Malformed payload for regression coverage.",
+            "mode": "gemini",
+        }
+
+    monkeypatch.setattr("app.routers.agents.ScannerAgent.run", fake_scanner_run)
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/agents/scanner",
+                json={
+                    "repo_url": "https://github.com/anukalp-mishra/Resume-Screening",
+                    "max_files_to_inspect": 80,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert "description" in response.json()["detail"]
+    assert len(fake_db.records["audits"]) == 1
+    assert fake_db.records["audits"][0].status == "failed"

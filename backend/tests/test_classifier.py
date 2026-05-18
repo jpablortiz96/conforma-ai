@@ -57,18 +57,27 @@ class FakeAsyncSession:
 
 
 @pytest.mark.parametrize(
-    ("description", "risk_class", "primary_article", "article_50", "omnibus_required"),
+    (
+        "description",
+        "risk_class",
+        "primary_article",
+        "article_50",
+        "deadline_iso",
+        "omnibus_required",
+    ),
     [
-        ("CV ranking for recruitment at a bank", "HIGH_RISK", "Annex III Section 4(a)", False, True),
-        ("Customer service chatbot for password reset", "LIMITED_RISK", "Article 50(1)", True, False),
-        ("Social credit scoring by Dutch municipality", "UNACCEPTABLE", "Article 5(1)(c)", False, False),
-        ("Email spam classifier", "MINIMAL_RISK", "Not applicable", False, False),
-        ("AI evaluating insurance premiums for life insurance", "HIGH_RISK", "Annex III Section 5(c)", False, True),
-        ("Deep fake video generator marketed to consumers", "LIMITED_RISK", "Article 50(4)", True, False),
-        ("Facial recognition for shoplifter detection in supermarkets private", "HIGH_RISK", "Annex III Section 1", False, True),
-        ("Real-time biometric ID in public squares for police", "UNACCEPTABLE", "Article 5(1)(h)", False, False),
-        ("Predictive maintenance for industrial machinery", "MINIMAL_RISK", "Not applicable", False, False),
-        ("Resume scoring AI that also generates explanations", "HIGH_RISK", "Annex III Section 4(a)", True, True),
+        ("resume screening model for recruitment", "HIGH_RISK", "Annex III Section 4(a)", False, "2027-12-02", True),
+        ("CV ranking for recruitment at a bank", "HIGH_RISK", "Annex III Section 4(a)", False, "2027-12-02", True),
+        ("Customer service chatbot for password reset", "LIMITED_RISK", "Article 50(1)", True, "2026-12-02", False),
+        ("Social credit scoring by Dutch municipality", "UNACCEPTABLE", "Article 5(1)(c)", False, "2025-02-02", False),
+        ("Email spam classifier", "MINIMAL_RISK", "Not applicable", False, None, False),
+        ("AI evaluating insurance premiums for life insurance", "HIGH_RISK", "Annex III Section 5(c)", False, "2027-12-02", True),
+        ("Deep fake video generator marketed to consumers", "LIMITED_RISK", "Article 50(4)", True, "2026-12-02", False),
+        ("Facial recognition for shoplifter detection in supermarkets private", "HIGH_RISK", "Annex III Section 1", False, "2027-12-02", True),
+        ("Real-time biometric ID in public squares for police", "UNACCEPTABLE", "Article 5(1)(h)", False, "2025-02-02", False),
+        ("Predictive maintenance for industrial machinery", "MINIMAL_RISK", "Not applicable", False, None, False),
+        ("Resume scoring AI that also generates explanations", "HIGH_RISK", "Annex III Section 4(a)", True, "2027-12-02", True),
+        ("AI safety component in a medical device", "HIGH_RISK", "Annex I", False, "2028-08-02", False),
     ],
 )
 def test_classifier_fallback_covers_all_required_d3_cases(
@@ -76,6 +85,7 @@ def test_classifier_fallback_covers_all_required_d3_cases(
     risk_class: str,
     primary_article: str,
     article_50: bool,
+    deadline_iso: str | None,
     omnibus_required: bool,
 ) -> None:
     """The deterministic classifier fallback should cover the mandatory D3 edge cases."""
@@ -85,7 +95,15 @@ def test_classifier_fallback_covers_all_required_d3_cases(
     assert response.risk_class == risk_class
     assert response.primary_article == primary_article
     assert response.triggers_article_50 is article_50
-    assert "Section" in response.primary_article or response.primary_article.startswith("Article") or response.primary_article == "Not applicable"
+    assert (
+        response.deadline_iso.isoformat() if response.deadline_iso is not None else None
+    ) == deadline_iso
+    assert (
+        "Section" in response.primary_article
+        or response.primary_article.startswith("Article")
+        or response.primary_article == "Annex I"
+        or response.primary_article == "Not applicable"
+    )
     if omnibus_required:
         assert "Digital Omnibus deal of 7 May 2026" in response.reasoning
     if description == "Resume scoring AI that also generates explanations":
@@ -130,5 +148,6 @@ async def test_classifier_agent_updates_ai_system_and_persists_agent_run(
     assert ai_system.primary_article == "Annex III Section 4(a)"
     assert ai_system.secondary_articles == ["Article 50(2)"]
     assert ai_system.deadline_iso is not None
+    assert ai_system.deadline_iso.isoformat() == "2027-12-02"
     assert ai_system.triggers_article_50 is True
     assert len(fake_db.records["agent_runs"]) == 1

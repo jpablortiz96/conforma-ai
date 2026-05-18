@@ -137,6 +137,8 @@ def test_audit_flow_runs_scanner_then_classifier_and_returns_portfolio_index(
     assert payload["portfolio_risk_index"] == 44
     assert len(payload["systems"]) == 2
     assert payload["systems"][0]["risk_class"] == "HIGH_RISK"
+    assert payload["systems"][0]["primary_article"] == "Annex III Section 4(a)"
+    assert payload["systems"][0]["deadline_iso"] == "2027-12-02"
     assert payload["systems"][0]["triggers_article_50"] is True
     assert payload["systems"][1]["risk_class"] == "MINIMAL_RISK"
     assert len(fake_db.records["audits"]) == 1
@@ -145,3 +147,161 @@ def test_audit_flow_runs_scanner_then_classifier_and_returns_portfolio_index(
     audit = fake_db.records["audits"][0]
     assert audit.status == "completed"
     assert audit.risk_index == "MEDIUM"
+
+
+def test_audit_flow_normalizes_resume_screening_classifier_output(
+    monkeypatch,
+) -> None:
+    """The audit flow should tolerate Gemini-style deadline text and still return Annex III Section 4(a)."""
+
+    fake_db = FakeAsyncSession()
+
+    async def override_get_db():
+        yield fake_db
+
+    async def fake_scanner_run(self, input_data, audit_id):
+        system = AISystem(
+            audit_id=audit_id,
+            name="resume_screening_model",
+            description=(
+                "Resume screening model for recruitment that ranks candidates using CV content, "
+                "skills, and project experience."
+            ),
+            source_files=["src/resume_screening/model.py", "README.md"],
+        )
+        self.db.add(system)
+        await self.db.flush()
+        return {
+            "audit_id": audit_id,
+            "repo_url": input_data["repo_url"],
+            "files_inspected": 24,
+            "ai_systems_found": [
+                {
+                    "id": system.id,
+                    "name": system.name,
+                    "description": system.description,
+                    "source_files": system.source_files,
+                    "detection_signals": [
+                        "file signal: src/resume_screening/model.py matched *model*.py",
+                        "README signal: README mentions recruitment screening and candidate ranking",
+                    ],
+                }
+            ],
+            "summary": "One recruitment-screening AI system candidate detected.",
+            "mode": "gemini",
+        }
+
+    async def fake_call_pro_json(prompt: str, temperature: float = 0.0) -> dict[str, object]:
+        return {
+            "risk_class": "HIGH_RISK",
+            "primary_article": "Annex III Section 4",
+            "secondary_articles": [],
+            "reasoning": (
+                "The system screens resumes for recruitment and therefore belongs in the "
+                "employment category under Annex III."
+            ),
+            "deadline": "2 December 2027",
+            "deadline_iso": "2 December 2027",
+            "confidence": 0.95,
+            "triggers_article_50": False,
+        }
+
+    monkeypatch.setattr("app.routers.audits.ScannerAgent.run", fake_scanner_run)
+    monkeypatch.setattr("app.agents.classifier.call_pro_json", fake_call_pro_json)
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/audits",
+                json={
+                    "repo_url": "https://github.com/anukalp-mishra/Resume-Screening",
+                    "max_files_to_inspect": 80,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["repo_url"] == "https://github.com/anukalp-mishra/Resume-Screening"
+    assert len(payload["systems"]) == 1
+    system = payload["systems"][0]
+    assert system["name"] == "resume_screening_model"
+    assert system["risk_class"] == "HIGH_RISK"
+    assert system["primary_article"] == "Annex III Section 4(a)"
+    assert system["deadline_iso"] == "2027-12-02"
+    assert system["deadline"] == "2 December 2027 for Annex III high-risk systems."
+    assert len(fake_db.records["agent_runs"]) == 1
+
+
+def test_audit_flow_upgrades_generic_resume_screening_candidate_to_high_risk(
+    monkeypatch,
+) -> None:
+    """The audit route should pass enough evidence for the classifier guardrail to fire."""
+
+    fake_db = FakeAsyncSession()
+
+    async def override_get_db():
+        yield fake_db
+
+    async def fake_scanner_run(self, input_data, audit_id):
+        system = AISystem(
+            audit_id=audit_id,
+            name="repository_ai_feature",
+            description=(
+                "The repository contains AI-related files or manifests, but its system boundaries are "
+                "only partially visible from the demo-grade heuristics."
+            ),
+            source_files=["README.md", "Resume_Screening.ipynb"],
+        )
+        self.db.add(system)
+        await self.db.flush()
+        return {
+            "audit_id": audit_id,
+            "repo_url": input_data["repo_url"],
+            "files_inspected": 18,
+            "ai_systems_found": [
+                {
+                    "id": system.id,
+                    "name": system.name,
+                    "description": system.description,
+                    "source_files": system.source_files,
+                    "detection_signals": [
+                        "repository signal: repository name contains Resume-Screening",
+                        "README signal: README.md mentions machine learning",
+                        "domain signal: README.md mentions resume or CV workflows",
+                        "file signal: Resume_Screening.ipynb suggests resume screening workflow",
+                    ],
+                }
+            ],
+            "summary": "One provisional AI system candidate detected.",
+            "mode": "fallback",
+        }
+
+    async def failing_call_pro_json(prompt: str, temperature: float = 0.0) -> dict[str, object]:
+        raise GeminiClientError("forced fallback")
+
+    monkeypatch.setattr("app.routers.audits.ScannerAgent.run", fake_scanner_run)
+    monkeypatch.setattr("app.agents.classifier.call_pro_json", failing_call_pro_json)
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/audits",
+                json={
+                    "repo_url": "https://github.com/anukalp-mishra/Resume-Screening",
+                    "max_files_to_inspect": 80,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["portfolio_risk_index"] >= 74
+    system = payload["systems"][0]
+    assert system["risk_class"] == "HIGH_RISK"
+    assert system["primary_article"] == "Annex III Section 4(a)"
+    assert system["deadline_iso"] == "2027-12-02"

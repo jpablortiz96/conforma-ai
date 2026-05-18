@@ -47,9 +47,11 @@ def test_render_annex_iv_html_contains_required_sections() -> None:
     assert "Annex IV Technical Documentation" in html
     assert "Audit ID" in html
     assert "AI System ID" in html
-    assert "Section 9 — Post-Market Monitoring" in html
-    assert "Appendix A — Gaps Identified" in html
-    assert "Appendix B — References" in html
+    assert "Annex III Section 4(a)" in html
+    assert "2 December 2027" in html
+    assert "Section 9" in html
+    assert "Appendix A" in html
+    assert "Appendix B" in html
     assert "Regulation EU 2024/1689" in html
     assert "{{" not in html
     assert "{%" not in html

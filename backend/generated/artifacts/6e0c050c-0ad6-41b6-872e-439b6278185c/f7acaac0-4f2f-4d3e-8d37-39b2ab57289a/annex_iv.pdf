@@ -1,0 +1,280 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 2996 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(Annex IV Technical Documentation) Tj
+T*
+(resume_screening_model) Tj
+T*
+() Tj
+T*
+(Audit ID: 6e0c050c-0ad6-41b6-872e-439b6278185c) Tj
+T*
+(AI System ID: f7acaac0-4f2f-4d3e-8d37-39b2ab57289a) Tj
+T*
+(Risk class: HIGH_RISK) Tj
+T*
+(Primary article: Annex III Section 4) Tj
+T*
+(Generated at: 2026-05-16T23:57:33.209817+00:00) Tj
+T*
+() Tj
+T*
+(Section 1 - General Description) Tj
+T*
+(The 'resume_screening_model' is a machine learning system designed to evaluate resumes. The) Tj
+T*
+(repository \(https://github.com/anukalp-mishra/Resume-Screening\) contains a Jupyter Notebook) Tj
+T*
+(\('Resume_Screening.ipynb'\) utilizing Python libraries such as numpy and pandas, indicating) Tj
+T*
+(standard data science and machine learning workflows. [GAP - information not available in) Tj
+T*
+(repository. Provider must document.] Missing elements include provider information, detailed) Tj
+T*
+(system architecture, hardware and software requirements, and the final market form.) Tj
+T*
+() Tj
+T*
+(Section 2 - Intended Purpose) Tj
+T*
+(The intended purpose of the system is to automate the resume screening process by evaluating) Tj
+T*
+(text-based resume data to generate predictions or classifications regarding candidate) Tj
+T*
+(suitability. As an AI system intended to be used for recruitment or selection of natural) Tj
+T*
+(persons, it is classified as high-risk under Annex III Section 4. [GAP - information not) Tj
+T*
+(available in repository. Provider must document.] Missing elements include intended users,) Tj
+T*
+(affected natural persons, and foreseeable misuse.) Tj
+T*
+() Tj
+T*
+(Section 3 - Human Oversight Measures) Tj
+T*
+([GAP - information not available in repository. Provider must document.] The repository) Tj
+T*
+(provides no evidence regarding the system's capabilities and limitations, implemented human) Tj
+T*
+(oversight mechanisms, or instructions for the interpretation of outputs by deployers.) Tj
+T*
+() Tj
+T*
+(Section 4 - Input Data Specifications) Tj
+T*
+(The system processes text-based resume data as indicated by the project description.) Tj
+T*
+(However, specific details regarding the datasets are absent. [GAP - information not) Tj
+T*
+(available in repository. Provider must document.] Missing elements include specifications) Tj
+T*
+(for training data, validation data, test data, data provenance, and data quality controls.) Tj
+T*
+() Tj
+T*
+(Section 5 - Design Specifications) Tj
+T*
+(The system is implemented via a Jupyter Notebook \('Resume_Screening.ipynb'\) utilizing) Tj
+T*
+(standard data science libraries \(numpy, pandas\) for machine learning workflows. [GAP -) Tj
+T*
+(information not available in repository. Provider must document.] Missing elements include) Tj
+T*
+(detailed system architecture, key design choices, and the classification rationale.) Tj
+T*
+() Tj
+T*
+(Section 6 - Risk Management System) Tj
+T*
+([GAP - information not available in repository. Provider must document.] There is no) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 1) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 2890 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(documented risk management system. Missing elements include identified risks, risk) Tj
+T*
+(estimation, and mitigation measures.) Tj
+T*
+() Tj
+T*
+(Section 7 - Validation and Testing) Tj
+T*
+([GAP - information not available in repository. Provider must document.] The repository) Tj
+T*
+(lacks documentation on validation and testing. Missing elements include test methodology,) Tj
+T*
+(test datasets, discriminatory bias testing, and test results.) Tj
+T*
+() Tj
+T*
+(Section 8 - Performance Metrics) Tj
+T*
+([GAP - information not available in repository. Provider must document.] No performance) Tj
+T*
+(metrics are documented. Missing elements include accuracy, robustness, cybersecurity) Tj
+T*
+(measures, and performance trade-offs.) Tj
+T*
+() Tj
+T*
+(Section 9 - Post-Market Monitoring) Tj
+T*
+([GAP - information not available in repository. Provider must document.] There is no) Tj
+T*
+(evidence of a post-market monitoring strategy. Missing elements include the monitoring) Tj
+T*
+(system design, risk reassessment plan, and incident reporting procedure.) Tj
+T*
+() Tj
+T*
+(Appendix A - Gaps Identified) Tj
+T*
+(- Provider information, detailed system architecture, hardware and software requirements,) Tj
+T*
+(and market form.) Tj
+T*
+(- Intended users, affected natural persons, and foreseeable misuse.) Tj
+T*
+(- System capabilities and limitations, implemented human oversight mechanisms, and) Tj
+T*
+(instructions for output interpretation.) Tj
+T*
+(- Specifications for training, validation, and test data, including data provenance and) Tj
+T*
+(quality controls.) Tj
+T*
+(- Detailed system architecture, key design choices, and classification rationale.) Tj
+T*
+(- Identified risks, risk estimation, and mitigation measures.) Tj
+T*
+(- Test methodology, test datasets, discriminatory bias testing, and test results.) Tj
+T*
+(- Performance metrics including accuracy, robustness, cybersecurity measures, and) Tj
+T*
+(trade-offs.) Tj
+T*
+(- Post-market monitoring system design, risk reassessment plan, and incident reporting) Tj
+T*
+(procedure.) Tj
+T*
+(- Provider identity, versioning, hardware dependencies, and market form are not fully) Tj
+T*
+(evidenced in the repository.) Tj
+T*
+(- Affected natural-person categories, intended users, and foreseeable misuse are not fully) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Human oversight procedures, escalation paths, and output interpretation guidance are not) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Dataset provenance, labeling, cleaning, validation data, and data-quality controls are not) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Formal architecture rationale, lifecycle change controls, and standards mapping are not) Tj
+T*
+(fully documented in the repository.) Tj
+T*
+(- The Article 9 risk-management process and provider-owned control register are not) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 2) Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 823 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(documented in the repository.) Tj
+T*
+(- Validation datasets, bias testing evidence, and documented test results are not present in) Tj
+T*
+(the repository.) Tj
+T*
+(- Accuracy, robustness, cybersecurity, and trade-off metrics are not evidenced in the) Tj
+T*
+(repository.) Tj
+T*
+(- Post-market monitoring, serious-incident reporting, and risk reassessment procedures are) Tj
+T*
+(not documented in the repository.) Tj
+T*
+() Tj
+T*
+(Appendix B - References) Tj
+T*
+(- Regulation EU 2024/1689) Tj
+T*
+(- Source repository: https://github.com/anukalp-mishra/Resume-Screening) Tj
+T*
+(- Audit ID: 6e0c050c-0ad6-41b6-872e-439b6278185c) Tj
+T*
+(- AI System ID: f7acaac0-4f2f-4d3e-8d37-39b2ab57289a) Tj
+T*
+(- Generated at: 2026-05-16T23:57:33.209817+00:00) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 3) Tj
+ET
+endstream
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000133 00000 n 
+0000000203 00000 n 
+0000000329 00000 n 
+0000003377 00000 n 
+0000003503 00000 n 
+0000006445 00000 n 
+0000006571 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+7445
+%%EOF

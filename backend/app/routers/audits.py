@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.classifier import ClassifierAgent
@@ -19,6 +20,7 @@ from app.core.exceptions import (
 )
 from app.db.models import Audit
 from app.db.session import get_db
+from app.schemas.agent import ClassifierResponse
 from app.schemas.audit import AuditCreateRequest, AuditResponse, AuditSystemResult
 
 router = APIRouter(prefix="/api/v1/audits", tags=["audits"])
@@ -85,6 +87,22 @@ def build_audit_summary(
     return " ".join(summary_parts)
 
 
+def build_classifier_evidence_text(candidate: dict[str, object], repo_url: str) -> str:
+    """Build a richer classifier description from scanner evidence."""
+
+    source_files = ", ".join(candidate.get("source_files", [])[:8]) or "None"
+    detection_signals = "; ".join(candidate.get("detection_signals", [])[:8]) or "None"
+    return "\n".join(
+        [
+            f"AI system name: {candidate['name']}",
+            f"Repository URL: {repo_url}",
+            f"Description: {candidate['description']}",
+            f"Source files: {source_files}",
+            f"Detection signals: {detection_signals}",
+        ]
+    )
+
+
 @router.post("", response_model=AuditResponse)
 async def run_audit(
     request: AuditCreateRequest,
@@ -113,17 +131,17 @@ async def run_audit(
             classifier_result = await classifier_agent.run(
                 {
                     "ai_system_id": candidate["id"],
-                    "system_description": (
-                        f"{candidate['name']}: {candidate['description']} Evidence trail: "
-                        + "; ".join(candidate.get("detection_signals", []))
-                    ),
+                    "system_description": build_classifier_evidence_text(candidate, str(request.repo_url)),
                     "context_files": [
+                        str(request.repo_url),
+                        candidate["name"],
                         *candidate.get("source_files", []),
                         *candidate.get("detection_signals", []),
                     ],
                 },
                 audit.id,
             )
+            normalized_classifier = ClassifierResponse.model_validate(classifier_result)
             systems.append(
                 AuditSystemResult(
                     id=candidate["id"],
@@ -131,7 +149,7 @@ async def run_audit(
                     description=candidate["description"],
                     source_files=candidate.get("source_files", []),
                     detection_signals=candidate.get("detection_signals", []),
-                    **classifier_result,
+                    **normalized_classifier.model_dump(mode="json"),
                 )
             )
 
@@ -163,7 +181,7 @@ async def run_audit(
         db.add(audit)
         await db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except (ClassifierValidationError, ClassifierExecutionError) as exc:
+    except (ClassifierValidationError, ClassifierExecutionError, ValidationError) as exc:
         audit.status = "failed"
         audit.completed_at = datetime.now(timezone.utc)
         db.add(audit)

@@ -7,9 +7,9 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
-from app.schemas.agent import RiskClass
+from app.schemas.agent import RiskClass, normalize_deadline_iso_value, sanitize_reference_text
 
 
 class AuditRead(BaseModel):
@@ -124,6 +124,30 @@ class AuditSystemResult(BaseModel):
     deadline_iso: date | None = None
     confidence: float = Field(..., ge=0.0, le=1.0)
     triggers_article_50: bool
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_payload(cls, value: Any) -> Any:
+        """Normalize classifier payloads before the audit response is assembled."""
+
+        if not isinstance(value, dict):
+            return value
+
+        payload = dict(value)
+        payload["primary_article"] = sanitize_reference_text(
+            str(payload.get("primary_article", "")).strip()
+        )
+        payload["reasoning"] = sanitize_reference_text(str(payload.get("reasoning", "")).strip())
+        payload["deadline"] = sanitize_reference_text(str(payload.get("deadline", "")).strip())
+        payload["deadline_iso"] = normalize_deadline_iso_value(payload.get("deadline_iso"))
+
+        secondary_articles = payload.get("secondary_articles", [])
+        if isinstance(secondary_articles, str):
+            secondary_articles = [secondary_articles] if secondary_articles.strip() else []
+        payload["secondary_articles"] = [
+            sanitize_reference_text(str(item).strip()) for item in list(secondary_articles or [])
+        ]
+        return payload
 
 
 class AuditResponse(BaseModel):

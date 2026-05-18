@@ -156,7 +156,18 @@ FALLBACK_CLASSIFICATION_RULES: tuple[ClassificationRule, ...] = (
             "operators, Article 50(2) transparency is additionally triggered. The Annex III deadline is "
             "2 December 2027, postponed from 2 August 2026 by the Digital Omnibus deal of 7 May 2026."
         ),
-        match_any=("resume scoring", "cv ranking", "resume ranking", "candidate scoring"),
+        match_any=(
+            "resume scoring",
+            "resume screening",
+            "resume ranking",
+            "resume screen",
+            "cv ranking",
+            "cv screening",
+            "candidate scoring",
+            "candidate screening",
+            "applicant scoring",
+            "applicant screening",
+        ),
         match_all=("explanation",),
     ),
     ClassificationRule(
@@ -173,11 +184,44 @@ FALLBACK_CLASSIFICATION_RULES: tuple[ClassificationRule, ...] = (
         ),
         match_any=(
             "cv ranking",
+            "cv screening",
             "resume scoring",
+            "resume screening",
+            "resume ranking",
+            "resume screen",
             "recruitment",
+            "recruiter",
+            "candidate scoring",
+            "candidate screening",
             "candidate filtering",
+            "applicant scoring",
+            "applicant screening",
             "job application",
             "hiring",
+        ),
+    ),
+    ClassificationRule(
+        name="annex_i_product_embedded_safety_component",
+        risk_class="HIGH_RISK",
+        primary_article="Annex I",
+        secondary_articles=(),
+        confidence=0.93,
+        triggers_article_50=False,
+        reasoning=(
+            "An AI safety component embedded in a regulated product such as a medical device maps "
+            "to Annex I product-embedded high-risk obligations rather than the standalone Annex III "
+            "categories. The applicable compliance date for those Annex I systems is 2 August 2028."
+        ),
+        match_all=("safety component",),
+        match_any=(
+            "medical device",
+            "medical devices",
+            "regulated product",
+            "product safety",
+            "toy",
+            "lift",
+            "vehicle",
+            "aviation",
         ),
     ),
     ClassificationRule(
@@ -318,27 +362,22 @@ def deadline_for_classification(
 ) -> tuple[str, date | None]:
     """Return the human-readable deadline and machine-readable ISO date."""
 
+    is_annex_i_reference = primary_article == "Annex I" or primary_article.startswith("Annex I ")
+
     if risk_class == "UNACCEPTABLE":
         return (
             "Already enforceable since 2 February 2025.",
             REGULATORY_CONTEXT["unacceptable_enforceable_since"],
         )
 
-    if risk_class == "HIGH_RISK" and triggers_article_50:
-        return (
-            "2 December 2026 for Article 50 transparency, and 2 December 2027 for Annex III high-risk obligations "
-            "(postponed from 2 August 2026 by the Digital Omnibus deal of 7 May 2026).",
-            REGULATORY_CONTEXT["article_50_deadline"],
-        )
-
     if risk_class == "HIGH_RISK":
-        if primary_article.startswith("Annex I"):
+        if is_annex_i_reference:
             return (
                 "2 August 2028 for Annex I product-embedded high-risk systems.",
                 REGULATORY_CONTEXT["high_risk_annex_i_deadline"],
             )
         return (
-            "2 December 2027 (postponed from 2 August 2026 by the Digital Omnibus deal of 7 May 2026).",
+            "2 December 2027 for Annex III high-risk systems.",
             REGULATORY_CONTEXT["high_risk_annex_iii_deadline"],
         )
 

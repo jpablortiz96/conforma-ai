@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+import re
 from typing import Any, Literal
 from uuid import UUID
 
@@ -13,16 +14,65 @@ from app.schemas.artifact import ArtifactSummary
 RiskClass = Literal["UNACCEPTABLE", "HIGH_RISK", "LIMITED_RISK", "MINIMAL_RISK"]
 ResponseMode = Literal["gemini", "fallback"]
 
+ISO_DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+NULLISH_DEADLINE_VALUES = {
+    "",
+    "null",
+    "none",
+    "n/a",
+    "na",
+    "not applicable",
+    "no mandatory deadline",
+}
+
 
 def sanitize_reference_text(value: str) -> str:
     """Normalize problematic section symbols into ASCII-safe wording."""
 
     return (
-        value.replace("Ãƒâ€šÃ‚Â§", "Section ")
+        value.replace("ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§", "Section ")
+        .replace("Ãƒâ€šÃ‚Â§", "Section ")
         .replace("Ã‚Â§", "Section ")
         .replace("Â§", "Section ")
-        .replace("§", "Section ")
     )
+
+
+def normalize_deadline_iso_value(value: Any) -> date | None:
+    """Coerce flexible deadline inputs into a safe date-or-null value."""
+
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        return value.date()
+
+    if isinstance(value, date):
+        return value
+
+    text = " ".join(str(value).strip().split())
+    if text.lower() in NULLISH_DEADLINE_VALUES:
+        return None
+
+    iso_match = ISO_DATE_PATTERN.search(text)
+    if iso_match:
+        try:
+            return date.fromisoformat(iso_match.group(0))
+        except ValueError:
+            pass
+
+    normalized_text = text.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized_text).date()
+    except ValueError:
+        pass
+
+    for fmt in ("%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+
+    return None
 
 
 class HealthResponse(BaseModel):
@@ -109,6 +159,7 @@ class ClassifierResponse(BaseModel):
         ]
         payload["reasoning"] = sanitize_reference_text(str(payload.get("reasoning", "")).strip())
         payload["deadline"] = sanitize_reference_text(str(payload.get("deadline", "")).strip())
+        payload["deadline_iso"] = normalize_deadline_iso_value(payload.get("deadline_iso"))
 
         try:
             payload["confidence"] = max(0.0, min(1.0, float(payload.get("confidence", 0.0))))
