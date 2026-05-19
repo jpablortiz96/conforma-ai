@@ -36,7 +36,8 @@ RUN pip install --upgrade pip && \
 
 COPY . /app
 
-RUN useradd --system --create-home --home-dir /home/appuser --shell /usr/sbin/nologin appuser && \
+RUN mkdir -p /app/generated/artifacts && \
+    useradd --system --create-home --home-dir /home/appuser --shell /usr/sbin/nologin appuser && \
     chown -R appuser:appuser /app
 
 USER appuser
