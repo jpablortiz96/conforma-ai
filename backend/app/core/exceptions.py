@@ -49,3 +49,15 @@ class GapAuditorExecutionError(ConformaAIError):
 
 class GapAuditorValidationError(ConformaAIError):
     """Raised when Gap Auditor inputs or outputs are invalid."""
+
+
+class MonitorExecutionError(ConformaAIError):
+    """Raised when the Monitor Agent cannot complete a run."""
+
+
+class MonitorValidationError(ConformaAIError):
+    """Raised when Monitor Agent inputs or outputs are invalid."""
+
+
+class OrchestratorExecutionError(ConformaAIError):
+    """Raised when the orchestrated audit pipeline cannot complete."""

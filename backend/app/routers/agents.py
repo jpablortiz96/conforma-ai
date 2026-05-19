@@ -13,6 +13,7 @@ from app.agents.classifier import classify_description
 from app.agents.documentation import DocumentationAgent
 from app.agents.disclosure import DisclosureAgent
 from app.agents.gap_auditor import GapAuditorAgent
+from app.agents.monitor import MonitorAgent
 from app.agents.scanner import ScannerAgent
 from app.core.exceptions import (
     ClassifierExecutionError,
@@ -22,6 +23,8 @@ from app.core.exceptions import (
     DocumentationValidationError,
     GapAuditorExecutionError,
     GapAuditorValidationError,
+    MonitorExecutionError,
+    MonitorValidationError,
     RepositoryCloneError,
     ScannerExecutionError,
     ScannerValidationError,
@@ -38,6 +41,8 @@ from app.schemas.agent import (
     DocumentationResponse,
     GapAuditorRequest,
     GapAuditorResponse,
+    MonitorRequest,
+    MonitorResponse,
     ScannerOutput,
     ScannerRequest,
 )
@@ -185,6 +190,27 @@ async def run_gap_auditor(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Gap Auditor execution failed. Check server logs for details.",
+        ) from exc
+
+
+@router.post("/api/v1/agents/monitor", response_model=MonitorResponse)
+async def run_monitor(
+    request: MonitorRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MonitorResponse:
+    """Generate deadline intelligence and post-audit monitoring alerts."""
+
+    agent = MonitorAgent(db)
+    try:
+        result = await agent.run(request.model_dump(mode="json"), request.audit_id)
+        return MonitorResponse.model_validate(result)
+    except MonitorValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except MonitorExecutionError as exc:
+        logger.exception("Monitor execution failed for audit %s", request.audit_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Monitor execution failed. Check server logs for details.",
         ) from exc
 
 

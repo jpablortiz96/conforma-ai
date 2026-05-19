@@ -101,6 +101,13 @@ ANNEX_I_PRODUCT_TOKENS = (
     "vehicle",
     "aviation",
 )
+STRUCTURED_EVIDENCE_PREFIXES = {
+    "ai system name:": "name",
+    "repository url:": "repo_url",
+    "description:": "description",
+    "source files:": "source_files",
+    "detection signals:": "detection_signals",
+}
 
 
 def _normalize_text(text: str) -> str:
@@ -113,6 +120,53 @@ def _contains_any(normalized: str, tokens: tuple[str, ...]) -> bool:
     """Return True when any token is present in the normalized text."""
 
     return any(token in normalized for token in tokens)
+
+
+def _extract_guardrail_texts(system_description: str) -> tuple[str, str, str]:
+    """Split structured classifier evidence into candidate-specific and repo-level text."""
+
+    sections: dict[str, list[str]] = {
+        "name": [],
+        "repo_url": [],
+        "description": [],
+        "source_files": [],
+        "detection_signals": [],
+        "unstructured": [],
+    }
+
+    for raw_line in system_description.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower_line = line.lower()
+        for prefix, section_name in STRUCTURED_EVIDENCE_PREFIXES.items():
+            if lower_line.startswith(prefix):
+                sections[section_name].append(line[len(prefix) :].strip())
+                break
+        else:
+            sections["unstructured"].append(line)
+
+    candidate_parts = [
+        *sections["name"],
+        *sections["description"],
+        *sections["source_files"],
+        *sections["detection_signals"],
+        *sections["unstructured"],
+    ]
+    repo_parts = list(sections["repo_url"])
+
+    if not candidate_parts and not repo_parts:
+        normalized = _normalize_text(system_description)
+        return normalized, normalized, ""
+
+    candidate_text = " ".join(candidate_parts).strip()
+    repo_text = " ".join(repo_parts).strip()
+    combined_text = " ".join(part for part in (candidate_text, repo_text) if part).strip()
+
+    normalized_candidate = _normalize_text(candidate_text) if candidate_text else ""
+    normalized_repo = _normalize_text(repo_text) if repo_text else ""
+    normalized_combined = _normalize_text(combined_text) if combined_text else _normalize_text(system_description)
+    return normalized_candidate, normalized_combined, normalized_repo
 
 
 def _is_employment_recruitment_use(normalized: str) -> bool:
@@ -201,7 +255,16 @@ def _ensure_article(
 ) -> ClassifierResponse:
     """Sharpen Gemini output to the exact paragraph references required by the handoff."""
 
-    normalized = _normalize_text(system_description)
+    normalized, normalized_combined, _normalized_repo = _extract_guardrail_texts(system_description)
+    if not normalized:
+        normalized = normalized_combined
+    candidate_is_recruitment = _is_employment_recruitment_use(normalized) and not _is_tutorial_only_recruitment_example(
+        normalized
+    )
+    candidate_is_annex_i = _is_annex_i_product_embedded_use(normalized)
+    candidate_is_insurance = _contains_any(normalized, INSURANCE_RISK_TOKENS)
+    candidate_is_credit = _contains_any(normalized, CREDITWORTHINESS_TOKENS)
+    candidate_is_generative = _is_generative_content_use(normalized)
 
     if response.risk_class == "UNACCEPTABLE":
         if "social" in normalized and "scoring" in normalized and any(
@@ -214,7 +277,7 @@ def _ensure_article(
             response.primary_article = "Article 5(1)(h)"
         response.secondary_articles = []
         response.triggers_article_50 = False
-    elif _is_employment_recruitment_use(normalized) and not _is_tutorial_only_recruitment_example(normalized):
+    elif candidate_is_recruitment:
         triggers_article_50 = response.triggers_article_50 or "explanation" in normalized
         secondary_articles = list(response.secondary_articles)
         if triggers_article_50 and "Article 50(2)" not in secondary_articles:
@@ -229,7 +292,7 @@ def _ensure_article(
             triggers_article_50=triggers_article_50,
             secondary_articles=secondary_articles,
         )
-    elif _is_annex_i_product_embedded_use(normalized):
+    elif candidate_is_annex_i:
         response = _force_high_risk_outcome(
             response,
             primary_article="Annex I",
@@ -239,7 +302,7 @@ def _ensure_article(
             ),
             triggers_article_50=False,
         )
-    elif _contains_any(normalized, INSURANCE_RISK_TOKENS):
+    elif candidate_is_insurance:
         response = _force_high_risk_outcome(
             response,
             primary_article="Annex III Section 5(c)",
@@ -249,7 +312,7 @@ def _ensure_article(
             ),
             triggers_article_50=False,
         )
-    elif _contains_any(normalized, CREDITWORTHINESS_TOKENS):
+    elif candidate_is_credit:
         response = _force_high_risk_outcome(
             response,
             primary_article="Annex III Section 5(b)",
@@ -259,7 +322,7 @@ def _ensure_article(
             ),
             triggers_article_50=False,
         )
-    elif _is_generative_content_use(normalized) and response.risk_class == "MINIMAL_RISK":
+    elif candidate_is_generative and response.risk_class in {"MINIMAL_RISK", "HIGH_RISK"}:
         response.risk_class = "LIMITED_RISK"
         response.primary_article = "Article 50(2)"
         response.secondary_articles = []
@@ -277,7 +340,10 @@ def _ensure_article(
             "that can produce synthetic text or related content, which triggers Article 50(2)."
         ).strip()
     elif response.risk_class == "HIGH_RISK":
-        if any(token in normalized for token in ("facial recognition", "face recognition", "shoplifter", "supermarket", "retail")):
+        if any(
+            token in normalized
+            for token in ("facial recognition", "face recognition", "shoplifter", "supermarket", "retail")
+        ):
             response.primary_article = "Annex III Section 1"
         deadline, deadline_iso = deadline_for_classification(
             "HIGH_RISK",
@@ -288,7 +354,10 @@ def _ensure_article(
         response.deadline_iso = deadline_iso
         _append_high_risk_deadline_note(response)
     elif response.risk_class == "LIMITED_RISK":
-        if any(token in normalized for token in ("chatbot", "password reset", "customer service bot", "virtual assistant")):
+        if any(
+            token in normalized
+            for token in ("chatbot", "password reset", "customer service bot", "virtual assistant")
+        ):
             response.primary_article = "Article 50(1)"
         elif any(token in normalized for token in ("deep fake", "deepfake", "synthetic video", "face swap", "video generator")):
             response.primary_article = "Article 50(4)"
@@ -306,6 +375,23 @@ def _ensure_article(
         response.deadline = deadline
         response.deadline_iso = deadline_iso
         response.triggers_article_50 = True
+    elif _is_generative_content_use(normalized_combined) and response.risk_class == "MINIMAL_RISK":
+        response.risk_class = "LIMITED_RISK"
+        response.primary_article = "Article 50(2)"
+        response.secondary_articles = []
+        response.triggers_article_50 = True
+        response.confidence = max(response.confidence, 0.79)
+        deadline, deadline_iso = deadline_for_classification(
+            "LIMITED_RISK",
+            triggers_article_50=True,
+            primary_article=response.primary_article,
+        )
+        response.deadline = deadline
+        response.deadline_iso = deadline_iso
+        response.reasoning = (
+            "Deterministic guardrail: the broader evidence bundle indicates a generative system that can produce "
+            "synthetic text or related content, which triggers Article 50(2)."
+        ).strip()
     else:
         response.primary_article = "Not applicable"
         deadline, deadline_iso = deadline_for_classification(
@@ -331,7 +417,9 @@ def _ensure_article(
 def classify_with_fallback(system_description: str) -> ClassifierResponse:
     """Run the deterministic D3 fallback classifier."""
 
-    normalized = _normalize_text(system_description)
+    normalized, normalized_combined, _normalized_repo = _extract_guardrail_texts(system_description)
+    if not normalized:
+        normalized = normalized_combined
 
     for rule in FALLBACK_CLASSIFICATION_RULES:
         any_match = not rule.match_any or any(token in normalized for token in rule.match_any)

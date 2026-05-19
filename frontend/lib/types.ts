@@ -5,6 +5,39 @@ export type RiskClass =
   | "MINIMAL_RISK";
 
 export type ResponseMode = "gemini" | "fallback";
+export type GapSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+export type MonitorAlertSeverity = "CRITICAL" | "WARNING" | "INFO";
+export type MonitorAlertType =
+  | "DEADLINE_APPROACH"
+  | "REGULATORY_UPDATE"
+  | "DRIFT_SIMULATION"
+  | "MISSING_CONTROL";
+export type ReadinessLevel = "LOW" | "MEDIUM" | "HIGH" | "ENTERPRISE_READY";
+export type AgentKey =
+  | "scanner"
+  | "classifier"
+  | "documentation"
+  | "disclosure"
+  | "gap_auditor"
+  | "monitor";
+export type AgentPipelineState = "idle" | "active" | "complete" | "queued" | "failed";
+export type AuditStreamStatus = "started" | "completed" | "failed";
+export type AuditStreamEventName =
+  | "audit_started"
+  | "scanner_started"
+  | "scanner_completed"
+  | "classifier_started"
+  | "classifier_completed"
+  | "documentation_started"
+  | "documentation_completed"
+  | "disclosure_started"
+  | "disclosure_completed"
+  | "gap_auditor_started"
+  | "gap_auditor_completed"
+  | "monitor_started"
+  | "monitor_completed"
+  | "audit_completed"
+  | "audit_failed";
 
 export interface HealthResponse {
   status: "operational";
@@ -126,8 +159,6 @@ export interface DisclosureResponse {
   mode: ResponseMode | null;
 }
 
-export type GapSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
-
 export interface ComplianceGap {
   severity: GapSeverity;
   title: string;
@@ -151,19 +182,131 @@ export interface CompliancePackResponse {
   summary: string;
 }
 
-export interface DemoHighRiskSystemResponse {
-  audit_id: string;
-  ai_system_id: string;
+export interface MonitorAlert {
+  severity: MonitorAlertSeverity;
+  type: MonitorAlertType;
+  title: string;
+  description: string;
+  affected_system_id: string | null;
+  recommended_action: string;
+  deadline_iso: string | null;
 }
 
-export type AgentPipelineState = "idle" | "active" | "complete" | "queued";
+export interface MonitorResponse {
+  audit_id: string;
+  alerts: MonitorAlert[];
+  next_check_at: string;
+  summary: string;
+  mode: ResponseMode | null;
+}
+
+export interface ExecutiveBusinessImpact {
+  estimated_fine_exposure_eur: number;
+  time_to_compliant_days: number;
+  systems_at_risk: number;
+  critical_actions_count: number;
+}
+
+export interface RegulatoryTimelineEntry {
+  date: string;
+  label: string;
+  affected_systems: string[];
+}
+
+export interface ExecutiveSummaryResponse {
+  audit_id: string;
+  board_summary: string;
+  business_impact: ExecutiveBusinessImpact;
+  regulatory_timeline: RegulatoryTimelineEntry[];
+  top_5_actions: string[];
+  investor_style_one_liner: string;
+  readiness_level: ReadinessLevel;
+}
+
+export interface EvidenceVaultGap {
+  category: string;
+  severity: string;
+  description: string;
+  remediation: string;
+  deadline: string | null;
+}
+
+export interface EvidenceVaultAgentRun {
+  agent_name: string;
+  status: string;
+  model: string | null;
+  started_at: string;
+  completed_at: string | null;
+  error: string | null;
+  output: Record<string, unknown> | null;
+}
+
+export interface EvidenceVaultSystem {
+  id: string;
+  name: string;
+  description: string;
+  source_files: string[];
+  detection_signals: string[];
+  risk_class: string | null;
+  primary_article: string | null;
+  secondary_articles: string[];
+  reasoning: string | null;
+  deadline: string | null;
+  deadline_iso: string | null;
+  confidence: number | null;
+  triggers_article_50: boolean;
+  artifacts: ArtifactSummary[];
+  disclosures: DisclosureResponse[];
+  gaps: EvidenceVaultGap[];
+  agent_runs: EvidenceVaultAgentRun[];
+}
+
+export interface EvidenceVaultResponse {
+  audit_id: string;
+  repo_url: string;
+  systems: EvidenceVaultSystem[];
+  audit_level_runs: EvidenceVaultAgentRun[];
+  monitor_alerts: MonitorAlert[];
+  summary: string;
+}
+
+export interface OrchestratedAuditStartResponse {
+  audit_id: string;
+  repo_url: string;
+  status: "running";
+  stream_url: string;
+}
+
+export interface AuditStreamEvent {
+  audit_id: string;
+  agent: string;
+  status: AuditStreamStatus;
+  message: string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+}
+
+export interface OrchestratedAuditCompletedResponse {
+  audit_id: string;
+  repo_url: string;
+  status: "completed";
+  systems: AuditSystem[];
+  portfolio_risk_index: number;
+  summary: string;
+  compliance_pack: CompliancePackResponse;
+  monitor: MonitorResponse;
+  executive_summary: ExecutiveSummaryResponse;
+  evidence_vault: EvidenceVaultResponse;
+}
 
 export interface AgentPipelineItem {
+  key: AgentKey;
   name: string;
   model: string;
   blurb: string;
   state: AgentPipelineState;
   cue?: string;
+  branch?: "core" | "parallel" | "post";
 }
 
 export interface SampleRepo {
@@ -171,20 +314,4 @@ export interface SampleRepo {
   repoUrl: string;
   maxFiles: number;
   note: string;
-}
-
-export type AuditProgressKey =
-  | "initializing"
-  | "scanning"
-  | "detecting"
-  | "classifying"
-  | "building";
-
-export interface AuditProgressStage {
-  key: AuditProgressKey;
-  label: string;
-  detail: string;
-  buttonLabel: string;
-  progressStart: number;
-  progressEnd: number;
 }

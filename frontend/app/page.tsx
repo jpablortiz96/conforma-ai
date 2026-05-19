@@ -1,2007 +1,1491 @@
 "use client";
 
+import { startTransition, useDeferredValue, useEffect, useRef, useState, useTransition } from "react";
 import {
+  Activity,
   AlertTriangle,
   ArrowRight,
-  BellRing,
+  Bot,
+  BrainCircuit,
   CheckCircle2,
+  ChevronRight,
+  Clock3,
   Eye,
-  FileSearch,
+  FileBadge2,
+  FileDown,
+  FileSearch2,
+  FolderKanban,
+  GanttChartSquare,
+  GitBranch,
+  Languages,
   LoaderCircle,
   Radar,
-  Scale,
-  SearchCode,
-  Shield,
+  ScanSearch,
+  ShieldAlert,
+  ShieldCheck,
+  Siren,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  createDemoHighRiskSystem,
   generateCompliancePack,
   generateDocumentation,
   getApiBaseUrl,
+  getAuditStreamUrl,
+  getEvidenceVault,
+  getExecutiveSummary,
   getHealth,
   listAuditArtifacts,
-  runAudit,
+  normalizeAiActText,
+  normalizeAuditStreamEvent,
+  normalizeOrchestratedAuditCompletedResponse,
+  startOrchestratedAudit,
 } from "@/lib/api";
 import type {
+  AgentKey,
   AgentPipelineItem,
+  AgentPipelineState,
   ArtifactSummary,
-  AuditProgressStage,
+  AuditArtifactsResponse,
+  AuditStreamEvent,
+  AuditStreamEventName,
+  ComplianceGap,
   CompliancePackResponse,
   DisclosureResponse,
-  AuditResponse,
-  DemoHighRiskSystemResponse,
-  DocumentationResponse,
-  GapSeverity,
+  DocumentationRequest,
+  EvidenceVaultResponse,
+  EvidenceVaultSystem,
+  ExecutiveSummaryResponse,
   HealthResponse,
+  MonitorAlert,
+  MonitorResponse,
+  OrchestratedAuditCompletedResponse,
+  ReadinessLevel,
   RiskClass,
   SampleRepo,
 } from "@/lib/types";
 
-const sampleRepos: SampleRepo[] = [
+const SAMPLE_REPOS: SampleRepo[] = [
   {
-    label: "Resume Screening - Recruitment AI",
+    label: "Resume Screening",
     repoUrl: "https://github.com/anukalp-mishra/Resume-Screening",
     maxFiles: 80,
-    note: "High-risk recruitment screening and CV ranking sample",
+    note: "Recruitment AI · Annex III Section 4(a)",
   },
   {
     label: "karpathy/llm.c",
     repoUrl: "https://github.com/karpathy/llm.c",
     maxFiles: 50,
-    note: "Compact LLM training and inference repo",
+    note: "Generative AI · Article 50(2)",
   },
   {
     label: "rasahq/rasa",
     repoUrl: "https://github.com/rasahq/rasa",
-    maxFiles: 80,
-    note: "Conversational AI stack with multiple candidate systems",
-  },
-  {
-    label: "microsoft/recommenders",
-    repoUrl: "https://github.com/microsoft/recommenders",
-    maxFiles: 120,
-    note: "Large recommendation-system portfolio",
+    maxFiles: 100,
+    note: "Conversational AI inventory",
   },
 ];
 
-const demoHighRiskSeed = {
-  name: "bank_cv_ranking_system",
-  description:
-    "AI system that ranks CVs for recruitment in a bank using education, employment history, skills and interview notes.",
-  riskClass: "HIGH_RISK" as const,
-  primaryArticle: "Annex III Section 4(a)",
-  sourceFiles: ["src/recruitment/ranker.py", "README.md"],
-  detectionSignals: [
-    "README mentions candidate ranking",
-    "ranker.py evaluates applicants for recruiter review",
-  ],
-};
-
-const auditStages: AuditProgressStage[] = [
+const PIPELINE_BLUEPRINT: Array<{
+  key: AgentKey;
+  name: string;
+  model: string;
+  blurb: string;
+  branch: "core" | "parallel" | "post";
+}> = [
   {
-    key: "initializing",
-    label: "Initializing audit",
-    detail: "Bootstrapping the audit session and validating the repository target.",
-    buttonLabel: "Running audit...",
-    progressStart: 0,
-    progressEnd: 20,
+    key: "scanner",
+    name: "Scanner",
+    model: "Gemini + heuristics",
+    blurb: "Clones the repo, extracts evidence, and inventories candidate AI systems.",
+    branch: "core",
   },
   {
-    key: "scanning",
-    label: "Cloning and scanning repository",
-    detail: "Scanner is shallow-cloning the repo and pre-filtering candidate evidence.",
-    buttonLabel: "Scanning repository...",
-    progressStart: 20,
-    progressEnd: 45,
+    key: "classifier",
+    name: "Classifier",
+    model: "Gemini Pro + legal guardrails",
+    blurb: "Maps each system to Annex III, Article 50, Article 5, or minimal risk.",
+    branch: "core",
   },
   {
-    key: "detecting",
-    label: "Detecting AI systems",
-    detail: "Scanner is extracting evidence snippets and assembling system candidates.",
-    buttonLabel: "Detecting AI systems...",
-    progressStart: 45,
-    progressEnd: 70,
+    key: "documentation",
+    name: "Documentation",
+    model: "Gemini Pro + Annex IV PDF",
+    blurb: "Builds Annex IV technical documentation when high-risk obligations apply.",
+    branch: "parallel",
   },
   {
-    key: "classifying",
-    label: "Classifying EU AI Act risk",
-    detail: "Classifier is mapping findings to Article 5, Annex III, and Article 50.",
-    buttonLabel: "Classifying systems...",
-    progressStart: 70,
-    progressEnd: 90,
+    key: "disclosure",
+    name: "Disclosure",
+    model: "Gemini Flash + Article 50",
+    blurb: "Generates multilingual transparency notices for user-facing or synthetic AI.",
+    branch: "parallel",
   },
   {
-    key: "building",
-    label: "Building Audit Console",
-    detail: "Consolidating the synchronous response and staging the console view.",
-    buttonLabel: "Building Audit Console...",
-    progressStart: 90,
-    progressEnd: 100,
+    key: "gap_auditor",
+    name: "Gap Auditor",
+    model: "Deterministic scoring engine",
+    blurb: "Calculates compliance score, fine exposure, and remediation priorities.",
+    branch: "post",
+  },
+  {
+    key: "monitor",
+    name: "Monitor",
+    model: "Deadline intelligence",
+    blurb: "Tracks obligations, missing controls, and regulatory timing after the audit.",
+    branch: "post",
   },
 ];
 
-const auditStageDurationsMs = [900, 1800, 2200, 2200, 1400];
-
-const riskTone: Record<RiskClass, string> = {
-  UNACCEPTABLE: "bg-rose-500/15 text-rose-100 ring-1 ring-rose-400/40",
-  HIGH_RISK: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-300/40",
-  LIMITED_RISK: "bg-sky-500/15 text-sky-100 ring-1 ring-sky-300/40",
-  MINIMAL_RISK: "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/40",
+const PROGRESS_BY_EVENT: Record<AuditStreamEventName, number> = {
+  audit_started: 4,
+  scanner_started: 12,
+  scanner_completed: 24,
+  classifier_started: 36,
+  classifier_completed: 50,
+  documentation_started: 58,
+  documentation_completed: 68,
+  disclosure_started: 74,
+  disclosure_completed: 82,
+  gap_auditor_started: 88,
+  gap_auditor_completed: 93,
+  monitor_started: 96,
+  monitor_completed: 99,
+  audit_completed: 100,
+  audit_failed: 100,
 };
 
-const riskIndexTone = (value: number): string => {
-  if (value >= 85) return "text-rose-200";
-  if (value >= 65) return "text-amber-200";
-  if (value >= 35) return "text-sky-200";
-  return "text-emerald-200";
-};
+const LANGUAGE_LABELS: Array<{ key: keyof NonNullable<DisclosureResponse["notices"]>; label: string }> = [
+  { key: "en", label: "English" },
+  { key: "it", label: "Italiano" },
+  { key: "es", label: "Español" },
+  { key: "fr", label: "Français" },
+  { key: "de", label: "Deutsch" },
+];
 
-const complianceScoreTone = (value: number): string => {
-  if (value >= 85) return "text-emerald-200";
-  if (value >= 65) return "text-sky-200";
-  if (value >= 40) return "text-amber-200";
-  return "text-rose-200";
-};
+function formatEuros(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "€0";
+  }
 
-const complianceScoreBand = (value: number): string => {
-  if (value >= 85) return "Strong";
-  if (value >= 65) return "On track";
-  if (value >= 40) return "At risk";
-  return "Critical";
-};
-
-const gapSeverityTone: Record<GapSeverity, string> = {
-  CRITICAL: "bg-rose-500/15 text-rose-100 ring-1 ring-rose-400/35",
-  HIGH: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-300/35",
-  MEDIUM: "bg-sky-500/15 text-sky-100 ring-1 ring-sky-300/35",
-  LOW: "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/35",
-};
-
-function formatEuros(value: number): string {
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat("en-IE", {
     style: "currency",
     currency: "EUR",
     maximumFractionDigits: 0,
   }).format(value);
 }
 
-function getSimulatedProgress(elapsedMs: number): number {
-  let remainingMs = elapsedMs;
-
-  for (const [index, stage] of auditStages.entries()) {
-    const durationMs = auditStageDurationsMs[index];
-    const stageEnd = index === auditStages.length - 1 ? 97 : stage.progressEnd;
-
-    if (remainingMs <= durationMs) {
-      const progressRatio = Math.min(remainingMs / durationMs, 1);
-      return stage.progressStart + (stageEnd - stage.progressStart) * progressRatio;
-    }
-
-    remainingMs -= durationMs;
+function formatDateLabel(value: string | null | undefined): string {
+  if (!value) {
+    return "No mandatory deadline";
   }
 
-  return 97;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-").map((part) => Number(part));
+    const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${String(day).padStart(2, "0")} ${monthLabels[Math.max(0, month - 1)]} ${year}`;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return normalizeAiActText(value);
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(parsed);
 }
 
-function getStageIndex(progress: number): number {
-  if (progress >= 90) return 4;
-  if (progress >= 70) return 3;
-  if (progress >= 45) return 2;
-  if (progress >= 20) return 1;
-  return 0;
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) {
+    return "Pending";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return normalizeAiActText(value);
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
 }
 
-function buildPipeline(
-  audit: AuditResponse | null,
-  isAuditRunning: boolean,
-  stageIndex: number,
-  documentationReady: boolean,
-  isDocumentationRunning: boolean,
-  compliancePackReady: boolean,
-  isCompliancePackRunning: boolean,
-  hasDisclosureSystems: boolean,
-): AgentPipelineItem[] {
-  const scannerState = audit
-    ? "complete"
-    : isAuditRunning
-      ? stageIndex <= 2
-        ? "active"
-        : "complete"
-      : "idle";
-  const classifierState = audit
-    ? "complete"
-    : isAuditRunning
-      ? stageIndex >= 3
-        ? "active"
-        : "idle"
-      : "idle";
-  const documentationState = documentationReady
-    ? "complete"
-    : isDocumentationRunning
-      ? "active"
-      : audit
-        ? "idle"
-        : "queued";
-  const disclosureState = compliancePackReady && hasDisclosureSystems
-    ? "complete"
-    : isCompliancePackRunning && hasDisclosureSystems
-      ? "active"
-      : audit
-        ? "idle"
-        : "queued";
-  const gapAuditorState = compliancePackReady
-    ? "complete"
-    : isCompliancePackRunning
-      ? "active"
-      : audit
-        ? "idle"
-        : "queued";
-
-  return [
-    {
-      name: "Scanner",
-      model: "gemini-3-flash-preview",
-      blurb: "Clone the repo, shortlist evidence, and inventory candidate AI systems.",
-      state: scannerState,
-      cue:
-        scannerState === "active"
-          ? "Live in D4B"
-          : scannerState === "complete"
-            ? "Completed"
-            : "Ready",
-    },
-    {
-      name: "Classifier",
-      model: "gemini-3.1-pro-preview",
-      blurb: "Map each detected system to Article 5, Annex III, or Article 50 obligations.",
-      state: classifierState,
-      cue:
-        classifierState === "active"
-          ? "Live in D4B"
-          : classifierState === "complete"
-            ? "Completed"
-            : "Queued after scan",
-    },
-    {
-      name: "Documentation",
-      model: "gemini-3.1-pro-preview",
-      blurb: "Generate Annex IV technical documentation and PDF artifacts for high-risk systems.",
-      state: documentationState,
-      cue:
-        documentationState === "complete"
-          ? "Artifact ready"
-          : documentationState === "active"
-            ? "Generating"
-            : "Live on demand",
-    },
-    {
-      name: "Disclosure",
-      model: "gemini-3-flash-preview",
-      blurb: "Generate multilingual Article 50 notices and placement guidance for exposed users.",
-      state: disclosureState,
-      cue:
-        disclosureState === "complete"
-          ? "Pack ready"
-          : disclosureState === "active"
-            ? "Generating"
-            : "Ready in pack",
-    },
-    {
-      name: "Gap Auditor",
-      model: "gemini-3.1-pro-preview",
-      blurb: "Compute compliance score, fine exposure, and prioritized remediation gaps.",
-      state: gapAuditorState,
-      cue:
-        gapAuditorState === "complete"
-          ? "Completed"
-          : gapAuditorState === "active"
-            ? "Scoring"
-            : "Ready in pack",
-    },
-    {
-      name: "Monitor",
-      model: "gemini-3-flash-preview",
-      blurb: "Deadline alerts and post-audit monitoring complete the loop later.",
-      state: "queued",
-      cue: "Queued for D4",
-    },
-  ];
+function riskTone(risk: RiskClass): string {
+  switch (risk) {
+    case "UNACCEPTABLE":
+      return "border-rose-400/40 bg-rose-500/12 text-rose-100";
+    case "HIGH_RISK":
+      return "border-amber-400/40 bg-amber-500/12 text-amber-100";
+    case "LIMITED_RISK":
+      return "border-sky-400/40 bg-sky-500/12 text-sky-100";
+    case "MINIMAL_RISK":
+    default:
+      return "border-emerald-400/35 bg-emerald-500/12 text-emerald-100";
+  }
 }
 
-function stateTone(state: AgentPipelineItem["state"]): string {
+function gapTone(severity: ComplianceGap["severity"]): string {
+  switch (severity) {
+    case "CRITICAL":
+      return "border-rose-400/40 bg-rose-500/10 text-rose-100";
+    case "HIGH":
+      return "border-orange-400/40 bg-orange-500/10 text-orange-100";
+    case "MEDIUM":
+      return "border-amber-400/35 bg-amber-500/10 text-amber-100";
+    case "LOW":
+    default:
+      return "border-sky-400/35 bg-sky-500/10 text-sky-100";
+  }
+}
+
+function monitorTone(severity: MonitorAlert["severity"]): string {
+  switch (severity) {
+    case "CRITICAL":
+      return "border-rose-400/40 bg-rose-500/12 text-rose-100";
+    case "WARNING":
+      return "border-amber-400/40 bg-amber-500/12 text-amber-100";
+    case "INFO":
+    default:
+      return "border-sky-400/35 bg-sky-500/12 text-sky-100";
+  }
+}
+
+function readinessTone(level: ReadinessLevel): string {
+  switch (level) {
+    case "ENTERPRISE_READY":
+      return "border-emerald-400/40 bg-emerald-500/12 text-emerald-100";
+    case "HIGH":
+      return "border-sky-400/40 bg-sky-500/12 text-sky-100";
+    case "MEDIUM":
+      return "border-amber-400/40 bg-amber-500/12 text-amber-100";
+    case "LOW":
+    default:
+      return "border-rose-400/40 bg-rose-500/12 text-rose-100";
+  }
+}
+
+function agentStateTone(state: AgentPipelineState): string {
   switch (state) {
     case "complete":
       return "border-emerald-400/30 bg-emerald-500/10";
     case "active":
-      return "agent-card-live border-sky-400/35 bg-sky-500/10";
+      return "agent-card-live border-sky-400/40 bg-sky-500/10";
+    case "failed":
+      return "border-rose-400/35 bg-rose-500/10";
     case "queued":
-      return "border-white/10 bg-slate-950/50";
+      return "border-fuchsia-400/25 bg-fuchsia-500/8";
+    case "idle":
     default:
-      return "border-white/10 bg-slate-950/35";
+      return "border-white/10 bg-white/[0.03]";
   }
 }
 
-function stateBadgeTone(state: AgentPipelineItem["state"]): string {
-  switch (state) {
-    case "complete":
-      return "bg-emerald-500/15 text-emerald-100";
-    case "active":
-      return "bg-sky-500/15 text-sky-100";
-    case "queued":
-      return "bg-white/5 text-slate-300";
-    default:
-      return "bg-white/5 text-slate-300";
+function computePipeline(events: AuditStreamEvent[], isRunning: boolean): AgentPipelineItem[] {
+  const lastByEvent: Partial<Record<AuditStreamEventName, AuditStreamEvent>> = {};
+  for (const event of events) {
+    const eventName = event.payload.event as AuditStreamEventName | undefined;
+    if (eventName) {
+      lastByEvent[eventName] = event;
+    }
   }
+
+  return PIPELINE_BLUEPRINT.map((item) => {
+    const started = lastByEvent[`${item.key}_started` as AuditStreamEventName];
+    const completed = lastByEvent[`${item.key}_completed` as AuditStreamEventName];
+    const failed = events.find(
+      (event) => event.status === "failed" && event.agent === item.key,
+    );
+
+    let state: AgentPipelineState = "idle";
+    if (failed) {
+      state = "failed";
+    } else if (completed) {
+      state = "complete";
+    } else if (started) {
+      state = "active";
+    } else if (isRunning) {
+      state = item.branch === "parallel" || item.branch === "post" ? "queued" : "idle";
+    }
+
+    let cue = item.blurb;
+    if (completed?.payload && typeof completed.payload === "object") {
+      if (item.key === "documentation") {
+        const count = Number(completed.payload.generated_count ?? 0);
+        cue = count > 0 ? `${count} Annex IV artifact${count === 1 ? "" : "s"} ready.` : "No high-risk systems required Annex IV output in this run.";
+      } else if (item.key === "disclosure") {
+        const count = Number(completed.payload.generated_count ?? 0);
+        cue = count > 0 ? `${count} multilingual disclosure pack${count === 1 ? "" : "s"} ready.` : "No Article 50 disclosures were required in this run.";
+      } else if (item.key === "gap_auditor") {
+        cue = `Compliance score ${completed.payload.compliance_score ?? "available"} with ${completed.payload.gaps_count ?? 0} tracked gaps.`;
+      } else if (item.key === "monitor") {
+        cue = `${completed.payload.alerts_count ?? 0} monitoring alert${completed.payload.alerts_count === 1 ? "" : "s"} published.`;
+      }
+    }
+
+    return {
+      key: item.key,
+      name: item.name,
+      model: item.model,
+      blurb: item.blurb,
+      state,
+      cue,
+      branch: item.branch,
+    };
+  });
 }
 
-function stateLabel(state: AgentPipelineItem["state"]): string {
-  switch (state) {
-    case "complete":
-      return "Complete";
-    case "active":
-      return "Active";
-    case "queued":
-      return "Queued for D4";
-    default:
-      return "Ready";
+function countGapsBySeverity(gaps: ComplianceGap[]): Record<ComplianceGap["severity"], number> {
+  return gaps.reduce(
+    (accumulator, gap) => {
+      accumulator[gap.severity] += 1;
+      return accumulator;
+    },
+    { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 },
+  );
+}
+
+function formatArtifactLabel(artifact: ArtifactSummary): string {
+  if (artifact.kind === "annex_iv_pdf") {
+    return "Annex IV PDF";
   }
+
+  if (artifact.kind === "article_50_notice_json") {
+    return "Article 50 notice JSON";
+  }
+
+  return artifact.file_name;
+}
+
+function ArtifactChip({ artifact }: { artifact: ArtifactSummary }) {
+  const downloadable = artifact.kind === "annex_iv_pdf";
+  const tone =
+    artifact.kind === "annex_iv_pdf"
+      ? "border-sky-400/35 bg-sky-500/12 text-sky-100"
+      : "border-violet-400/30 bg-violet-500/12 text-violet-100";
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${tone}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold">{formatArtifactLabel(artifact)}</p>
+          <p className="mt-1 text-xs uppercase tracking-[0.24em] text-white/55">{artifact.kind.replaceAll("_", " ")}</p>
+          <p className="mt-2 text-xs text-white/45">{artifact.file_name}</p>
+        </div>
+        {downloadable ? (
+          <a
+            href={artifact.download_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-full border border-white/15 px-3 py-1 text-xs font-semibold text-white transition hover:border-sky-300/45 hover:text-sky-100"
+          >
+            Download
+            <FileDown className="h-3.5 w-3.5" />
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export default function HomePage() {
-  const isDevelopment = process.env.NODE_ENV === "development";
-  const [repoUrl, setRepoUrl] = useState<string>(sampleRepos[0].repoUrl);
-  const [maxFiles, setMaxFiles] = useState<number>(sampleRepos[0].maxFiles);
-  const [audit, setAudit] = useState<AuditResponse | null>(null);
+  const [repoUrl, setRepoUrl] = useState(SAMPLE_REPOS[0].repoUrl);
+  const [maxFilesToInspect, setMaxFilesToInspect] = useState(SAMPLE_REPOS[0].maxFiles);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [backendError, setBackendError] = useState<string | null>(null);
-  const [requestError, setRequestError] = useState<string | null>(null);
-  const [isAuditRunning, setIsAuditRunning] = useState<boolean>(false);
-  const [progress, setProgress] = useState<number>(0);
-  const [stageIndex, setStageIndex] = useState<number>(0);
-  const [annexIvArtifactMap, setAnnexIvArtifactMap] = useState<Record<string, ArtifactSummary>>({});
-  const [documentationMap, setDocumentationMap] = useState<Record<string, DocumentationResponse>>({});
-  const [documentationErrors, setDocumentationErrors] = useState<Record<string, string>>({});
-  const [documentationLoadingId, setDocumentationLoadingId] = useState<string | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [isAuditRunning, setIsAuditRunning] = useState(false);
+  const [activeAuditId, setActiveAuditId] = useState<string | null>(null);
+  const [events, setEvents] = useState<AuditStreamEvent[]>([]);
+  const [orchestratedResult, setOrchestratedResult] = useState<OrchestratedAuditCompletedResponse | null>(null);
   const [compliancePack, setCompliancePack] = useState<CompliancePackResponse | null>(null);
-  const [compliancePackError, setCompliancePackError] = useState<string | null>(null);
-  const [isCompliancePackRunning, setIsCompliancePackRunning] = useState<boolean>(false);
-  const [demoSystem, setDemoSystem] = useState<DemoHighRiskSystemResponse | null>(null);
-  const [isCreatingDemo, setIsCreatingDemo] = useState<boolean>(false);
-  const [demoError, setDemoError] = useState<string | null>(null);
+  const [executiveSummary, setExecutiveSummary] = useState<ExecutiveSummaryResponse | null>(null);
+  const [evidenceVault, setEvidenceVault] = useState<EvidenceVaultResponse | null>(null);
+  const [artifacts, setArtifacts] = useState<AuditArtifactsResponse | null>(null);
+  const [documentationBusySystemId, setDocumentationBusySystemId] = useState<string | null>(null);
+  const [documentationMessage, setDocumentationMessage] = useState<string | null>(null);
+  const [documentationError, setDocumentationError] = useState<string | null>(null);
+  const [complianceBusy, setComplianceBusy] = useState(false);
+  const [complianceError, setComplianceError] = useState<string | null>(null);
+  const [isPending, startViewTransition] = useTransition();
+
+  const deferredEvents = useDeferredValue(events);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const resultsRef = useRef<HTMLElement | null>(null);
+  const streamCompletedRef = useRef(false);
 
   useEffect(() => {
-    void (async () => {
+    let cancelled = false;
+
+    async function checkHealth() {
       try {
-        const payload = await getHealth();
-        setHealth(payload);
-        setBackendError(null);
+        const response = await getHealth();
+        if (!cancelled) {
+          setHealth(response);
+          setHealthError(null);
+        }
       } catch (error) {
-        setBackendError(
-          error instanceof Error
-            ? error.message
-            : "The backend is unavailable. Start the API at localhost:8000 and refresh.",
-        );
+        if (!cancelled) {
+          setHealthError(error instanceof Error ? error.message : "Backend health probe failed.");
+        }
       }
-    })();
+    }
+
+    void checkHealth();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (!isAuditRunning) {
-      return undefined;
+    if (!orchestratedResult) {
+      return;
     }
 
-    const startedAt = Date.now();
-    const intervalId = window.setInterval(() => {
-      const elapsedMs = Date.now() - startedAt;
-      const simulatedProgress = getSimulatedProgress(elapsedMs);
-      setProgress((currentProgress) => {
-        const nextProgress = Math.max(currentProgress, simulatedProgress);
-        return Math.min(nextProgress, 97);
-      });
-    }, 120);
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [orchestratedResult]);
 
+  useEffect(() => {
     return () => {
-      window.clearInterval(intervalId);
+      eventSourceRef.current?.close();
     };
-  }, [isAuditRunning]);
+  }, []);
 
-  useEffect(() => {
-    setStageIndex(getStageIndex(progress));
-  }, [progress]);
+  async function refreshAuditViews(auditId: string) {
+    const [pack, executive, evidence, listedArtifacts] = await Promise.all([
+      generateCompliancePack(auditId),
+      getExecutiveSummary(auditId),
+      getEvidenceVault(auditId),
+      listAuditArtifacts(auditId),
+    ]);
 
-  useEffect(() => {
-    if (!audit || isAuditRunning) {
-      return;
-    }
-
-    resultsRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
+    startViewTransition(() => {
+      setCompliancePack(pack);
+      setExecutiveSummary(executive);
+      setEvidenceVault(evidence);
+      setArtifacts(listedArtifacts);
     });
-  }, [audit, isAuditRunning]);
+  }
 
-  useEffect(() => {
-    if (!audit) {
-      return;
-    }
+  async function handleRunOrchestratedAudit() {
+    eventSourceRef.current?.close();
+    streamCompletedRef.current = false;
 
-    void (async () => {
-      try {
-        const payload = await listAuditArtifacts(audit.audit_id);
-        const nextArtifacts: Record<string, ArtifactSummary> = {};
-        payload.artifacts.forEach((artifact) => {
-          if (artifact.ai_system_id && artifact.kind === "annex_iv_pdf") {
-            nextArtifacts[artifact.ai_system_id] = artifact;
+    setAuditError(null);
+    setComplianceError(null);
+    setDocumentationError(null);
+    setDocumentationMessage(null);
+    setOrchestratedResult(null);
+    setCompliancePack(null);
+    setExecutiveSummary(null);
+    setEvidenceVault(null);
+    setArtifacts(null);
+    setEvents([]);
+    setActiveAuditId(null);
+    setIsAuditRunning(true);
+
+    try {
+      const startResponse = await startOrchestratedAudit({
+        repo_url: repoUrl.trim(),
+        max_files_to_inspect: maxFilesToInspect,
+      });
+      setActiveAuditId(startResponse.audit_id);
+
+      const stream = new EventSource(getAuditStreamUrl(startResponse.stream_url));
+      eventSourceRef.current = stream;
+
+      const handledEvents = new Set<AuditStreamEventName>([
+        "audit_started",
+        "scanner_started",
+        "scanner_completed",
+        "classifier_started",
+        "classifier_completed",
+        "documentation_started",
+        "documentation_completed",
+        "disclosure_started",
+        "disclosure_completed",
+        "gap_auditor_started",
+        "gap_auditor_completed",
+        "monitor_started",
+        "monitor_completed",
+        "audit_completed",
+        "audit_failed",
+      ]);
+
+      const bind = (eventName: AuditStreamEventName) => {
+        stream.addEventListener(eventName, async (incoming) => {
+          const messageEvent = incoming as MessageEvent<string>;
+          const parsed = normalizeAuditStreamEvent(JSON.parse(messageEvent.data) as AuditStreamEvent);
+
+          setEvents((current) => [...current, parsed]);
+
+          if (eventName === "audit_completed") {
+            streamCompletedRef.current = true;
+            stream.close();
+            const normalizedResult = normalizeOrchestratedAuditCompletedResponse(
+              parsed.payload.result as OrchestratedAuditCompletedResponse,
+            );
+            const listedArtifacts = await listAuditArtifacts(parsed.audit_id);
+
+            startViewTransition(() => {
+              setOrchestratedResult(normalizedResult);
+              setCompliancePack(normalizedResult.compliance_pack);
+              setExecutiveSummary(normalizedResult.executive_summary);
+              setEvidenceVault(normalizedResult.evidence_vault);
+              setArtifacts(listedArtifacts);
+              setAuditError(null);
+            });
+            setIsAuditRunning(false);
+          }
+
+          if (eventName === "audit_failed") {
+            streamCompletedRef.current = true;
+            stream.close();
+            setIsAuditRunning(false);
+            setAuditError(parsed.message);
           }
         });
-        setAnnexIvArtifactMap((currentArtifacts) => ({ ...currentArtifacts, ...nextArtifacts }));
-      } catch {
-        return;
-      }
-    })();
-  }, [audit]);
+      };
 
-  const documentationReady = useMemo(
-    () =>
-      Object.keys(annexIvArtifactMap).length > 0 ||
-      Object.values(documentationMap).some(
-        (response) => response.required && response.status === "generated",
-      ),
-    [annexIvArtifactMap, documentationMap],
-  );
-  const hasDisclosureSystems = useMemo(
-    () => audit?.systems.some((system) => system.triggers_article_50) ?? false,
-    [audit],
-  );
-  const pipeline = useMemo(
-    () =>
-      buildPipeline(
-        audit,
-        isAuditRunning,
-        stageIndex,
-        documentationReady,
-        documentationLoadingId !== null,
-        compliancePack !== null,
-        isCompliancePackRunning,
-        hasDisclosureSystems,
-      ),
-    [
-      audit,
-      compliancePack,
-      documentationLoadingId,
-      documentationReady,
-      hasDisclosureSystems,
-      isAuditRunning,
-      isCompliancePackRunning,
-      stageIndex,
-    ],
-  );
-  const currentStage = auditStages[stageIndex] ?? auditStages[0];
-  const disclosureMap = useMemo(() => {
-    const nextMap: Record<string, DisclosureResponse> = {};
-    compliancePack?.disclosures.forEach((disclosure) => {
-      nextMap[disclosure.ai_system_id] = disclosure;
-    });
-    return nextMap;
-  }, [compliancePack]);
-  const complianceGapCounts = useMemo(() => {
-    const counts: Record<GapSeverity, number> = {
-      CRITICAL: 0,
-      HIGH: 0,
-      MEDIUM: 0,
-      LOW: 0,
-    };
-    compliancePack?.gaps.forEach((gap) => {
-      counts[gap.severity] += 1;
-    });
-    return counts;
-  }, [compliancePack]);
+      handledEvents.forEach((eventName) => bind(eventName));
 
-  const refreshArtifacts = async (auditId: string) => {
-    try {
-      const payload = await listAuditArtifacts(auditId);
-      const nextArtifacts: Record<string, ArtifactSummary> = {};
-      payload.artifacts.forEach((artifact) => {
-        if (artifact.ai_system_id && artifact.kind === "annex_iv_pdf") {
-          nextArtifacts[artifact.ai_system_id] = artifact;
+      stream.onerror = () => {
+        if (!streamCompletedRef.current) {
+          setAuditError(
+            "The live audit stream disconnected before the orchestrated run finished. Check the backend logs and retry.",
+          );
+          setIsAuditRunning(false);
         }
-      });
-      setAnnexIvArtifactMap((currentArtifacts) => ({ ...currentArtifacts, ...nextArtifacts }));
-    } catch {
-      return;
-    }
-  };
-
-  const runDocumentationForSystem = async (options: {
-    auditId: string;
-    aiSystemId: string;
-    systemName: string;
-    systemDescription: string;
-    riskClass: RiskClass;
-    primaryArticle: string;
-    sourceFiles: string[];
-    detectionSignals: string[];
-    repoUrl?: string;
-  }) => {
-    setDocumentationLoadingId(options.aiSystemId);
-    setDocumentationErrors((currentErrors) => {
-      const nextErrors = { ...currentErrors };
-      delete nextErrors[options.aiSystemId];
-      return nextErrors;
-    });
-
-    try {
-      const response = await generateDocumentation({
-        audit_id: options.auditId,
-        ai_system_id: options.aiSystemId,
-        system_description: options.systemDescription,
-        risk_class: options.riskClass,
-        primary_article: options.primaryArticle,
-        source_code_snippets: [
-          ...options.sourceFiles.map((sourceFile) => `Referenced source file: ${sourceFile}`),
-          ...options.detectionSignals.map((signal) => `Evidence trail: ${signal}`),
-        ].slice(0, 10),
-        repo_metadata: {
-          repo_url: options.repoUrl ?? "demo://high-risk-system",
-          source_files: options.sourceFiles,
-          detection_signals: options.detectionSignals,
-          system_name: options.systemName,
-        },
-      });
-
-      setDocumentationMap((currentResponses) => ({
-        ...currentResponses,
-        [options.aiSystemId]: response,
-      }));
-      if (response.artifact) {
-        setAnnexIvArtifactMap((currentArtifacts) => ({
-          ...currentArtifacts,
-          [options.aiSystemId]: response.artifact!,
-        }));
-      }
-      await refreshArtifacts(options.auditId);
+        stream.close();
+      };
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Annex IV generation failed. Verify that the backend and PDF stack are available.";
-      setDocumentationErrors((currentErrors) => ({
-        ...currentErrors,
-        [options.aiSystemId]: message,
-      }));
-    } finally {
-      setDocumentationLoadingId(null);
-    }
-  };
-
-  const generateDemoDocumentation = async () => {
-    if (!demoSystem) {
-      return;
-    }
-
-    await runDocumentationForSystem({
-      auditId: demoSystem.audit_id,
-      aiSystemId: demoSystem.ai_system_id,
-      systemName: demoHighRiskSeed.name,
-      systemDescription: demoHighRiskSeed.description,
-      riskClass: demoHighRiskSeed.riskClass,
-      primaryArticle: demoHighRiskSeed.primaryArticle,
-      sourceFiles: demoHighRiskSeed.sourceFiles,
-      detectionSignals: demoHighRiskSeed.detectionSignals,
-      repoUrl: "https://github.com/demo/bank-cv-ranking-system",
-    });
-  };
-
-  const createDemoSystem = async () => {
-    setDemoError(null);
-    setIsCreatingDemo(true);
-
-    try {
-      const payload = await createDemoHighRiskSystem();
-      setDemoSystem(payload);
-      await refreshArtifacts(payload.audit_id);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to create the demo high-risk system. Verify that the backend is running.";
-      setDemoError(message);
-    } finally {
-      setIsCreatingDemo(false);
-    }
-  };
-
-  const applySample = (sample: SampleRepo) => {
-    if (isAuditRunning || isCompliancePackRunning) {
-      return;
-    }
-
-    setRepoUrl(sample.repoUrl);
-    setMaxFiles(sample.maxFiles);
-    setRequestError(null);
-  };
-
-  const submit = async () => {
-    setRequestError(null);
-    setAudit(null);
-    setAnnexIvArtifactMap({});
-    setDocumentationMap({});
-    setDocumentationErrors({});
-    setCompliancePack(null);
-    setCompliancePackError(null);
-    setIsAuditRunning(true);
-    setProgress(6);
-    setStageIndex(0);
-
-    try {
-      const payload = await runAudit({
-        repo_url: repoUrl,
-        max_files_to_inspect: maxFiles,
-      });
-
-      setProgress(100);
-      setStageIndex(auditStages.length - 1);
-      setAudit(payload);
-      setBackendError(null);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Audit failed. Verify that the backend and local services are running.";
-      setRequestError(message);
-      setProgress(0);
-      setStageIndex(0);
-    } finally {
+      setAuditError(error instanceof Error ? error.message : "Unable to start the orchestrated audit.");
       setIsAuditRunning(false);
     }
-  };
+  }
 
-  const runCompliancePack = async () => {
-    if (!audit) {
+  async function handleGenerateAnnexIv(systemId: string) {
+    if (!activeAuditId) {
       return;
     }
 
-    setCompliancePackError(null);
-    setIsCompliancePackRunning(true);
+    const system = orchestratedResult?.systems.find((item) => item.id === systemId);
+    if (!system) {
+      return;
+    }
+
+    setDocumentationBusySystemId(systemId);
+    setDocumentationError(null);
+    setDocumentationMessage(null);
 
     try {
-      const payload = await generateCompliancePack(audit.audit_id);
-      setCompliancePack(payload);
-      await refreshArtifacts(audit.audit_id);
+      const payload: DocumentationRequest = {
+        audit_id: activeAuditId,
+        ai_system_id: system.id,
+        system_description: system.description,
+        risk_class: system.risk_class,
+        primary_article: system.primary_article,
+        source_code_snippets: [
+          ...system.source_files.map((file) => `Referenced source file: ${file}`),
+          ...system.detection_signals.map((signal) => `Evidence trail: ${signal}`),
+        ].slice(0, 12),
+        repo_metadata: {
+          repo_url: repoUrl,
+          source_files: system.source_files,
+          detection_signals: system.detection_signals,
+          system_name: system.name,
+        },
+      };
+      const response = await generateDocumentation(payload);
+      setDocumentationMessage(response.message);
+      await refreshAuditViews(activeAuditId);
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Compliance Pack generation failed. Verify that the backend is running and try again.";
-      setCompliancePackError(message);
+      setDocumentationError(
+        error instanceof Error ? error.message : "Unable to generate the Annex IV artifact.",
+      );
     } finally {
-      setIsCompliancePackRunning(false);
+      setDocumentationBusySystemId(null);
     }
-  };
+  }
 
-  const isRunningWithoutResults = isAuditRunning && !audit;
+  async function handleGenerateCompliancePack() {
+    if (!activeAuditId) {
+      return;
+    }
+
+    setComplianceBusy(true);
+    setComplianceError(null);
+
+    try {
+      await refreshAuditViews(activeAuditId);
+    } catch (error) {
+      setComplianceError(
+        error instanceof Error ? error.message : "Unable to refresh the compliance pack.",
+      );
+    } finally {
+      setComplianceBusy(false);
+    }
+  }
+
+  const latestEvent = events[events.length - 1] ?? null;
+  const liveProgress = latestEvent ? PROGRESS_BY_EVENT[latestEvent.payload.event as AuditStreamEventName] ?? 0 : 0;
+  const pipeline = computePipeline(events, isAuditRunning);
+  const gapCounts = countGapsBySeverity(compliancePack?.gaps ?? []);
+  const visibleEvents = deferredEvents.slice(-10).reverse();
+  const systems = orchestratedResult?.systems ?? [];
+
+  function getEvidenceSystem(systemId: string): EvidenceVaultSystem | undefined {
+    return evidenceVault?.systems.find((system) => system.id === systemId);
+  }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.24),_transparent_38%),radial-gradient(circle_at_85%_15%,_rgba(14,165,233,0.16),_transparent_25%),linear-gradient(180deg,_#04111f_0%,_#07162b_45%,_#04101c_100%)] text-white">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-5 py-6 lg:px-8 lg:py-8">
-        <header className="panel-shell overflow-hidden">
-          <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(56,189,248,0.08),transparent_28%,rgba(59,130,246,0.05)_55%,transparent)]" />
-          <div className="relative grid gap-8 xl:grid-cols-[1.1fr_0.9fr]">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-sky-100">
-                <Shield className="h-3.5 w-3.5" />
-                Conforma-AI Audit Console
-              </div>
-              <p className="mt-5 text-sm font-semibold uppercase tracking-[0.32em] text-sky-200/90">
-                D4B Demo Grade
-              </p>
-              <h1 className="mt-3 max-w-4xl text-4xl font-semibold tracking-tight text-slate-50 md:text-6xl">
-                Scanner, Classifier, and Annex IV documentation inside one EU AI Act console.
+    <main className="mx-auto flex min-h-screen max-w-[1520px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+      <section className="panel-shell fade-rise overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-sky-300/70 to-transparent" />
+        <div className="grid gap-8 xl:grid-cols-[1.35fr_0.95fr]">
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-sky-100">
+              <Sparkles className="h-3.5 w-3.5" />
+              D5 Winner Mode
+            </div>
+            <div className="space-y-4">
+              <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+                Conforma-AI
+                <span className="block text-2xl font-medium text-sky-100/90 sm:text-3xl">
+                  Autonomous EU AI Act control room for real repositories.
+                </span>
               </h1>
-              <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-200">
-                Point the console at a public repository, inventory candidate AI systems, and map
-                them to Article 5, Annex III, or Article 50 obligations with portfolio-level risk
-                visibility, then generate Annex IV PDF artifacts for the high-risk systems.
+              <p className="max-w-3xl text-base leading-8 text-slate-200/80 sm:text-lg">
+                Scanner, Classifier, Documentation, Disclosure, Gap Auditor, and Monitor now work as one
+                orchestrated compliance officer. Stream the audit live, inspect the legal evidence trail,
+                and hand your board a readiness narrative with deadlines, fine exposure, and concrete actions.
               </p>
             </div>
-
-            <div className="grid gap-4 rounded-[30px] border border-white/10 bg-slate-950/45 p-5 shadow-[0_24px_80px_rgba(2,12,27,0.45)]">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-slate-300">Backend status</span>
-                {health ? (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-100">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    {health.status}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-100">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    {backendError ? "offline" : "checking"}
-                  </span>
-                )}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
+                <p className="text-xs uppercase tracking-[0.28em] text-white/45">Live backend</p>
+                <p className="mt-3 flex items-center gap-2 text-lg font-semibold text-white">
+                  <span className={`h-2.5 w-2.5 rounded-full ${health ? "live-dot bg-emerald-300" : "bg-rose-300"}`} />
+                  {health ? `${health.service} ${health.version}` : "Connectivity degraded"}
+                </p>
+                <p className="mt-2 text-sm text-slate-300/75">
+                  {healthError ? healthError : `Streaming from ${getApiBaseUrl()} with synchronous fallback endpoints preserved.`}
+                </p>
               </div>
-              <dl className="grid gap-2 text-sm text-slate-300">
-                <div className="flex justify-between gap-4">
-                  <dt>Service</dt>
-                  <dd className="font-mono text-slate-100">{health?.service ?? "conforma-ai"}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt>Version</dt>
-                  <dd className="font-mono text-slate-100">{health?.version ?? "0.1.0"}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt>API target</dt>
-                  <dd className="font-mono text-slate-100">{getApiBaseUrl()}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt>Execution mode</dt>
-                  <dd className="text-slate-100">Synchronous D4B audit flow</dd>
-                </div>
-              </dl>
-              <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-slate-300">
-                D4B keeps the main audit synchronous, then layers Documentation, Disclosure, and
-                Gap Auditor on demand once the AI systems inventory is ready. Monitor remains the
-                next visible stage in the six-agent roadmap.
-              </p>
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
+                <p className="text-xs uppercase tracking-[0.28em] text-white/45">Realtime transport</p>
+                <p className="mt-3 flex items-center gap-2 text-lg font-semibold text-white">
+                  <Radar className="h-5 w-5 text-sky-200" />
+                  SSE pipeline
+                </p>
+                <p className="mt-2 text-sm text-slate-300/75">
+                  Honest agent events from audit start to executive summary, without removing the legacy sync path.
+                </p>
+              </div>
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
+                <p className="text-xs uppercase tracking-[0.28em] text-white/45">Legal surface</p>
+                <p className="mt-3 flex items-center gap-2 text-lg font-semibold text-white">
+                  <ShieldCheck className="h-5 w-5 text-emerald-200" />
+                  Annex III + Article 50
+                </p>
+                <p className="mt-2 text-sm text-slate-300/75">
+                  Annex IV PDFs, multilingual disclosures, compliance score, deadline intelligence, and evidence vault.
+                </p>
+              </div>
             </div>
           </div>
-        </header>
 
-        <section className="grid gap-6 xl:grid-cols-[1.02fr_0.98fr]">
-          <article className="panel-shell">
-            <div className="flex items-start justify-between gap-4">
+          <div className="rounded-[30px] border border-white/10 bg-slate-950/45 p-5 shadow-[0_24px_80px_rgba(2,10,24,0.45)] backdrop-blur">
+            <div className="flex items-center gap-3 text-white">
+              <GitBranch className="h-5 w-5 text-sky-200" />
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-200">
-                  Run Audit
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold text-slate-50">
-                  Inventory and classify a public AI codebase
-                </h2>
+                <p className="text-lg font-semibold">Launch an orchestrated audit</p>
+                <p className="text-sm text-slate-300/75">Pick a public repo, stream the six-agent chain, then review the control stack.</p>
               </div>
-              <SearchCode className="h-6 w-6 text-sky-200" />
             </div>
+            <div className="mt-5 space-y-4">
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.26em] text-white/45">Repository URL</span>
+                <input
+                  value={repoUrl}
+                  onChange={(event) => setRepoUrl(event.currentTarget.value)}
+                  placeholder="https://github.com/org/repo"
+                  className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-300/40 focus:ring-2 focus:ring-sky-400/20"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.26em] text-white/45">Max files to inspect</span>
+                <input
+                  type="number"
+                  min={20}
+                  max={400}
+                  value={maxFilesToInspect}
+                  onChange={(event) => setMaxFilesToInspect(event.currentTarget.valueAsNumber || 50)}
+                  className="mt-2 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-300/40 focus:ring-2 focus:ring-sky-400/20"
+                />
+              </label>
 
-            <label htmlFor="repo-url" className="mt-6 block text-sm font-medium text-slate-200">
-              Repository URL
-            </label>
-            <input
-              id="repo-url"
-              type="url"
-              value={repoUrl}
-              onChange={(event) => setRepoUrl(event.target.value)}
-              disabled={isAuditRunning || isCompliancePackRunning}
-              className="mt-3 w-full rounded-[24px] border border-white/10 bg-slate-950/55 px-4 py-4 text-base text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 disabled:cursor-not-allowed disabled:opacity-70"
-              placeholder="https://github.com/org/repo"
-            />
-
-            <div className="mt-5 grid gap-4 md:grid-cols-[0.72fr_1fr]">
-              <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  Scan window
-                </p>
-                <p className="mt-2 text-3xl font-semibold text-slate-50">{maxFiles}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Max candidate files passed from the pre-filter into the audit path.
-                </p>
-              </div>
-              <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  Sample repositories
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {sampleRepos.map((sample) => (
+              <div className="grid gap-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.26em] text-white/45">Sample public repos</p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {SAMPLE_REPOS.map((sample) => (
                     <button
-                       key={sample.label}
-                       type="button"
-                       onClick={() => applySample(sample)}
-                       disabled={isAuditRunning || isCompliancePackRunning}
-                      className="rounded-full border border-white/10 bg-slate-950/45 px-3 py-2 text-sm text-slate-200 transition hover:border-sky-300/40 hover:bg-sky-500/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      key={sample.repoUrl}
+                      type="button"
+                      onClick={() => {
+                        setRepoUrl(sample.repoUrl);
+                        setMaxFilesToInspect(sample.maxFiles);
+                      }}
+                      className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition hover:border-sky-300/30 hover:bg-sky-400/10"
                     >
-                      {sample.label}
+                      <p className="text-sm font-semibold text-white">{sample.label}</p>
+                      <p className="mt-1 text-xs text-slate-300/70">{sample.note}</p>
                     </button>
                   ))}
                 </div>
-                <p className="mt-3 text-sm leading-6 text-slate-400">
-                  Click a sample to preload its repo URL and an appropriate inspection budget.
-                </p>
               </div>
-            </div>
 
-            <div className="mt-5 grid gap-2">
-              {sampleRepos.map((sample) => (
-                <div
-                  key={`${sample.label}-note`}
-                  className={`rounded-2xl border px-4 py-3 text-sm leading-6 ${
-                    repoUrl === sample.repoUrl
-                      ? "border-sky-400/35 bg-sky-500/10 text-sky-100"
-                      : "border-white/10 bg-slate-950/30 text-slate-400"
-                  }`}
-                >
-                  <span className="font-semibold text-slate-100">{sample.label}</span> -{" "}
-                  {sample.note}
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  void submit();
-                }}
-                disabled={isAuditRunning || isCompliancePackRunning}
-                className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void handleRunOrchestratedAudit()}
+                disabled={isAuditRunning || !repoUrl.trim()}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(120deg,#2563eb_0%,#0ea5e9_55%,#38bdf8_100%)] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_40px_rgba(37,99,235,0.35)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isAuditRunning ? (
-                  <>
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                    {currentStage.buttonLabel}
-                  </>
-                ) : (
-                  <>
-                    Run audit
-                    <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
+                {isAuditRunning ? <LoaderCircle className="h-4.5 w-4.5 animate-spin" /> : <ScanSearch className="h-4.5 w-4.5" />}
+                {isAuditRunning ? "Running orchestrated audit..." : "Run Orchestrated Audit"}
               </button>
-              <p className="text-sm text-slate-400">
-                The console calls <span className="font-mono text-slate-200">POST /api/v1/audits</span>.
+              <p className="text-xs leading-6 text-slate-300/65">
+                The orchestrator streams Scanner, Classifier, Documentation, Disclosure, Gap Auditor, and Monitor in one pass. Legacy synchronous endpoints remain available as fallback for demo resilience.
               </p>
             </div>
+          </div>
+        </div>
+      </section>
 
-            {isDevelopment ? (
-              <details className="mt-5 rounded-[24px] border border-white/10 bg-slate-950/30 px-4 py-4 text-sm text-slate-300">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      Developer sandbox
-                    </p>
-                    <p className="mt-1 text-sm leading-6 text-slate-300">
-                      Seed a synthetic high-risk system for Annex IV testing without running a full repository audit.
-                    </p>
+      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="panel-shell fade-rise">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Agent pipeline</p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">Realtime orchestration</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-300/75">
+                Scanner and Classifier drive the core inventory. Documentation and Disclosure branch off when the legal triggers apply. Gap Auditor and Monitor close the loop with operational guidance.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200/80">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/45">Live stage</p>
+              <p className="mt-2 font-semibold text-white">{latestEvent?.message ?? "Waiting for the next orchestrated audit."}</p>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.24em] text-white/50">
+              <span>Pipeline progress</span>
+              <span>{liveProgress}%</span>
+            </div>
+            <div className="mt-3 h-3 overflow-hidden rounded-full border border-white/10 bg-white/5">
+              <div
+                className={`progress-shell h-full rounded-full transition-[width] duration-700 ${isAuditRunning ? "cockpit-pulse" : ""}`}
+                style={{ width: `${Math.max(liveProgress, orchestratedResult ? 100 : 0)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {pipeline.map((agent) => (
+              <article
+                key={agent.key}
+                className={`rounded-[28px] border p-5 transition ${agentStateTone(agent.state)}`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="inline-flex items-center gap-2">
+                    <span className={`h-2.5 w-2.5 rounded-full ${agent.state === "active" ? "live-dot bg-sky-300" : agent.state === "complete" ? "bg-emerald-300" : agent.state === "failed" ? "bg-rose-300" : agent.state === "queued" ? "bg-fuchsia-300" : "bg-white/25"}`} />
+                    <p className="text-sm font-semibold text-white">{agent.name}</p>
                   </div>
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
-                    Development only
+                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-white/55">
+                    {agent.branch}
                   </span>
-                </summary>
-
-                <div className="mt-4 border-t border-white/10 pt-4">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void createDemoSystem();
-                      }}
-                      disabled={isCreatingDemo || isAuditRunning}
-                      className="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 transition hover:border-sky-300/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isCreatingDemo ? (
-                        <>
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                          Creating demo system...
-                        </>
-                      ) : (
-                        "Create demo high-risk system"
-                      )}
-                    </button>
-                    <p className="text-sm text-slate-400">
-                      Seeds a bank CV ranking system for internal D4B validation.
-                    </p>
-                  </div>
-
-                  {demoSystem ? (
-                    <div className="mt-4 rounded-[24px] border border-sky-400/20 bg-sky-500/10 p-4 fade-rise">
-                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200">
-                            Demo high-risk seed ready
-                          </p>
-                          <p className="mt-2 text-lg font-semibold text-slate-50">
-                            {demoHighRiskSeed.name}
-                          </p>
-                          <p className="mt-2 text-sm leading-6 text-slate-300">
-                            {demoHighRiskSeed.description}
-                          </p>
-                          <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-300">
-                            <span className="rounded-full border border-white/10 bg-slate-950/35 px-3 py-1 font-mono">
-                              Audit {demoSystem.audit_id}
-                            </span>
-                            <span className="rounded-full border border-white/10 bg-slate-950/35 px-3 py-1 font-mono">
-                              System {demoSystem.ai_system_id}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-start gap-3 xl:items-end">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void generateDemoDocumentation();
-                            }}
-                            disabled={documentationLoadingId === demoSystem.ai_system_id}
-                            className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {documentationLoadingId === demoSystem.ai_system_id ? (
-                              <>
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                                Generating Annex IV...
-                              </>
-                            ) : (
-                              "Generate Annex IV PDF"
-                            )}
-                          </button>
-                          {annexIvArtifactMap[demoSystem.ai_system_id] ? (
-                            <a
-                              href={annexIvArtifactMap[demoSystem.ai_system_id].download_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sm font-semibold text-sky-100 underline decoration-sky-300/50 underline-offset-4"
-                            >
-                              Download generated Annex IV PDF
-                            </a>
-                          ) : null}
-                        </div>
-                      </div>
-                      {documentationMap[demoSystem.ai_system_id]?.message ? (
-                        <p className="mt-4 text-sm leading-6 text-slate-300">
-                          {documentationMap[demoSystem.ai_system_id].message}
-                        </p>
-                      ) : null}
-                      {documentationErrors[demoSystem.ai_system_id] ? (
-                        <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                          {documentationErrors[demoSystem.ai_system_id]}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {demoError ? (
-                    <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                      {demoError}
-                    </div>
-                  ) : null}
                 </div>
-              </details>
-            ) : null}
+                <p className="mt-3 text-xs uppercase tracking-[0.24em] text-sky-100/65">{agent.model}</p>
+                <p className="mt-3 text-sm leading-7 text-slate-200/75">{agent.cue}</p>
+              </article>
+            ))}
+          </div>
+        </div>
 
-            {isRunningWithoutResults ? (
-              <div className="mt-5 rounded-[24px] border border-sky-400/25 bg-sky-500/10 p-4 fade-rise">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200">
-                      Audit running
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-slate-50">{currentStage.label}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-300">{currentStage.detail}</p>
-                  </div>
-                  <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-sky-300/25 bg-slate-950/45">
-                    <Sparkles className="h-5 w-5 text-sky-100" />
-                  </div>
-                </div>
-                <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-white/8">
-                  <div className="progress-shell h-full rounded-full" style={{ width: `${progress}%` }} />
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-4 text-xs uppercase tracking-[0.18em] text-slate-400">
-                  <span>Progress</span>
-                  <span className="font-semibold text-sky-100">{Math.round(progress)}%</span>
-                </div>
-              </div>
-            ) : null}
-
-            {requestError ? (
-              <div className="mt-5 rounded-[24px] border border-rose-400/30 bg-rose-500/10 p-4 fade-rise">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 rounded-2xl border border-rose-300/20 bg-rose-500/15 p-2">
-                    <AlertTriangle className="h-4 w-4 text-rose-100" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-rose-100">Audit could not complete</p>
-                    <p className="mt-1 text-sm leading-6 text-rose-50/90">{requestError}</p>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {backendError ? (
-              <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-100">
-                Backend connection issue: {backendError}
-              </div>
-            ) : null}
-          </article>
-
-          <aside className="panel-shell">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-200">
-                  Agent Pipeline
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold text-slate-50">
-                  Six-agent roadmap, with Documentation now available on demand
-                </h2>
-              </div>
-              <Radar className="h-6 w-6 text-sky-200" />
+        <div className="panel-shell fade-rise">
+          <div className="flex items-center gap-3">
+            <Activity className="h-5 w-5 text-sky-200" />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Event stream</p>
+              <h2 className="mt-1 text-2xl font-semibold text-white">Agent activity log</h2>
             </div>
+          </div>
+          <p className="mt-3 text-sm leading-7 text-slate-300/75">
+            Real SSE events from the backend. No fake completions. If the stream fails, the console keeps the last known trace for inspection.
+          </p>
 
-            <div className="mt-6 overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/45 p-5">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                    Audit progress
-                  </p>
-                  <p className="mt-2 text-xl font-semibold text-slate-50">
-                    {isAuditRunning
-                      ? currentStage.label
-                      : audit
-                        ? "Audit completed"
-                        : "Ready to launch"}
-                  </p>
+          <div className="mt-5 space-y-3">
+            {visibleEvents.length ? (
+              visibleEvents.map((event) => (
+                <div key={`${event.timestamp}-${event.agent}-${event.status}`} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${event.status === "completed" ? "bg-emerald-300" : event.status === "failed" ? "bg-rose-300" : "live-dot bg-sky-300"}`} />
+                      <p className="text-sm font-semibold text-white">{event.agent}</p>
+                    </div>
+                    <span className="text-[11px] uppercase tracking-[0.24em] text-white/45">{formatDateTime(event.timestamp)}</span>
+                  </div>
+                  <p className="mt-2 text-sm leading-7 text-slate-200/80">{event.message}</p>
                 </div>
-                <div
-                  className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
-                    isAuditRunning
-                      ? "cockpit-pulse border border-sky-300/25 bg-sky-500/15 text-sky-100"
-                      : audit
-                        ? "border border-emerald-300/25 bg-emerald-500/15 text-emerald-100"
-                        : "border border-white/10 bg-white/5 text-slate-300"
-                  }`}
-                >
-                  {isAuditRunning ? "Audit running" : audit ? "Complete" : "Idle"}
-                </div>
+              ))
+            ) : (
+              <div className="rounded-[28px] border border-dashed border-white/15 bg-black/20 p-6 text-sm leading-7 text-slate-300/72">
+                Launch an orchestrated audit to watch the six-agent trace in real time. This panel will list every honest SSE event, from repo cloning through executive summary publication.
               </div>
+            )}
+          </div>
 
-              <p className="mt-3 text-sm leading-6 text-slate-300">
-                {isAuditRunning
-                  ? currentStage.detail
-                  : audit
-                    ? "Scanner and Classifier completed. Documentation, Disclosure, and Gap Auditor are now available on demand for the selected audit."
-                    : "Launch a repo audit to activate Scanner plus Classifier, then generate Annex IV PDFs and a compliance pack from the resulting inventory."}
+          {(auditError || complianceError || documentationError) ? (
+            <div className="mt-5 rounded-[26px] border border-rose-400/30 bg-rose-500/10 p-4 text-sm leading-7 text-rose-50">
+              <div className="flex items-center gap-2 font-semibold">
+                <AlertTriangle className="h-4.5 w-4.5" />
+                Control-room exception
+              </div>
+              <p className="mt-2">{auditError ?? complianceError ?? documentationError}</p>
+            </div>
+          ) : null}
+
+          {documentationMessage ? (
+            <div className="mt-5 rounded-[26px] border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm leading-7 text-emerald-50">
+              <div className="flex items-center gap-2 font-semibold">
+                <CheckCircle2 className="h-4.5 w-4.5" />
+                Artifact update
+              </div>
+              <p className="mt-2">{documentationMessage}</p>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section ref={resultsRef} className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="panel-shell fade-rise">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Control metrics</p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">Board-facing snapshot</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleGenerateCompliancePack()}
+              disabled={!activeAuditId || complianceBusy || isAuditRunning}
+              className="inline-flex items-center gap-2 rounded-2xl border border-sky-300/25 bg-sky-500/12 px-4 py-2 text-sm font-semibold text-sky-100 transition hover:border-sky-200/45 hover:bg-sky-500/18 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {complianceBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+              {complianceBusy ? "Refreshing compliance pack..." : "Generate Compliance Pack"}
+            </button>
+          </div>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/45">Audit ID</p>
+              <p className="mt-3 break-all text-sm font-semibold text-white">{activeAuditId ?? "Pending audit launch"}</p>
+            </div>
+            <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/45">Portfolio Risk Index</p>
+              <p className="mt-3 text-4xl font-semibold text-white">{orchestratedResult?.portfolio_risk_index ?? "--"}</p>
+            </div>
+            <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/45">Compliance Score</p>
+              <p className="mt-3 text-4xl font-semibold text-white">{compliancePack?.compliance_score ?? "--"}</p>
+            </div>
+            <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/45">Estimated Fine Exposure</p>
+              <p className="mt-3 text-3xl font-semibold text-white">{formatEuros(compliancePack?.estimated_fine_exposure_eur)}</p>
+            </div>
+            <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/45">Time to Compliant</p>
+              <p className="mt-3 text-3xl font-semibold text-white">
+                {compliancePack ? `${compliancePack.time_to_compliant_days} days` : "--"}
               </p>
-
-              <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/8">
-                <div
-                  className="progress-shell h-full rounded-full"
-                  style={{ width: `${audit ? 100 : progress}%` }}
-                />
-              </div>
-
-              <div className="mt-3 flex items-center justify-between gap-4 text-xs uppercase tracking-[0.18em] text-slate-400">
-                <span>{isAuditRunning ? "Current stage" : audit ? "Latest run" : "Pipeline state"}</span>
-                <span className="font-semibold text-slate-100">
-                  {audit ? "100%" : `${Math.round(progress)}%`}
-                </span>
-              </div>
-
-              <div className="mt-5 grid gap-2 md:grid-cols-5">
-                {auditStages.map((stage, index) => {
-                  const stageState = audit
-                    ? "complete"
-                    : index < stageIndex
-                      ? "complete"
-                      : index === stageIndex && isAuditRunning
-                        ? "active"
-                        : "idle";
-
-                  return (
-                    <div
-                      key={stage.key}
-                      className={`rounded-2xl border px-3 py-3 text-xs transition ${
-                        stageState === "complete"
-                          ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
-                          : stageState === "active"
-                            ? "cockpit-pulse border-sky-400/30 bg-sky-500/10 text-sky-100"
-                            : "border-white/10 bg-white/[0.03] text-slate-400"
-                      }`}
-                    >
-                      <p className="font-semibold uppercase tracking-[0.16em]">
-                        {stage.progressStart}-{stage.progressEnd}%
-                      </p>
-                      <p className="mt-2 leading-5">{stage.label}</p>
-                    </div>
-                  );
-                })}
+            </div>
+            <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/45">Readiness Level</p>
+              <div className={`mt-3 inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${readinessTone(executiveSummary?.readiness_level ?? "LOW")}`}>
+                {executiveSummary?.readiness_level ?? "Pending"}
               </div>
             </div>
+          </div>
+        </div>
 
-            <p className="mt-4 text-sm leading-6 text-slate-400">
-              This D4B console keeps the core audit synchronous. LangGraph fan-out and SSE streaming arrive later.
-            </p>
-
-            <div className="mt-6 grid gap-3">
-              {pipeline.map((item, index) => (
-                <article
-                  key={item.name}
-                  className={`rounded-[26px] border p-4 transition ${stateTone(item.state)}`}
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-950/50 text-sm font-semibold text-slate-100">
-                      {item.state === "active" ? (
-                        <span className="live-dot h-2.5 w-2.5 rounded-full bg-sky-300" />
-                      ) : item.state === "complete" ? (
-                        <CheckCircle2 className="h-5 w-5 text-emerald-200" />
-                      ) : (
-                        index + 1
-                      )}
+        <div className="panel-shell fade-rise">
+          <div className="flex items-center gap-3">
+            <Siren className="h-5 w-5 text-sky-200" />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Executive Summary</p>
+              <h2 className="mt-1 text-2xl font-semibold text-white">Board-ready narrative</h2>
+            </div>
+          </div>
+          {executiveSummary ? (
+            <div className="mt-5 space-y-5">
+              <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                <p className="text-sm leading-8 text-slate-100/90">{executiveSummary.board_summary}</p>
+              </div>
+              <div className="rounded-[28px] border border-sky-300/20 bg-sky-500/8 p-5">
+                <p className="text-xs uppercase tracking-[0.24em] text-sky-100/60">Investor-style one-liner</p>
+                <p className="mt-2 text-lg font-semibold text-white">{executiveSummary.investor_style_one_liner}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-white/45">Top 5 actions</p>
+                <div className="mt-3 space-y-3">
+                  {executiveSummary.top_5_actions.map((action, index) => (
+                    <div key={`${index + 1}-${action}`} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-7 text-slate-200/80">
+                      <span className="mr-2 text-sky-200">{String(index + 1).padStart(2, "0")}</span>
+                      {action}
                     </div>
-                    <div className="min-w-0 flex-1">
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[28px] border border-dashed border-white/15 bg-black/20 p-6 text-sm leading-7 text-slate-300/72">
+              Launch an orchestrated audit to generate a board summary, a regulatory timeline, and an investor-style readiness signal.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="panel-shell fade-rise">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">AI Systems Inventory</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Defensible system-by-system legal mapping</h2>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300/75">
+            {systems.length ? `${systems.length} system${systems.length === 1 ? "" : "s"} in the current audit.` : "No systems yet."}
+          </div>
+        </div>
+
+        {systems.length ? (
+          <div className="mt-6 grid gap-5 xl:grid-cols-2">
+            {systems.map((system) => {
+              const evidenceSystem = getEvidenceSystem(system.id);
+              const annexIvArtifact = evidenceSystem?.artifacts.find((artifact) => artifact.kind === "annex_iv_pdf");
+              const disclosure = evidenceSystem?.disclosures[0] ?? compliancePack?.disclosures.find((item) => item.ai_system_id === system.id);
+              const systemGaps = evidenceSystem?.gaps ?? [];
+
+              return (
+                <article key={system.id} className="rounded-[30px] border border-white/10 bg-black/20 p-5 shadow-[0_18px_60px_rgba(2,8,18,0.28)]">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-lg font-semibold text-slate-50">{item.name}</h3>
-                        <span
-                          className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${stateBadgeTone(item.state)}`}
-                        >
-                          {stateLabel(item.state)}
+                        <h3 className="text-xl font-semibold text-white">{system.name}</h3>
+                        <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] ${riskTone(system.risk_class)}`}>
+                          {system.risk_class.replaceAll("_", " ")}
                         </span>
                       </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-300">{item.blurb}</p>
-                      <div className="mt-3 flex flex-wrap items-center gap-3">
-                        <p className="font-mono text-xs text-slate-400">{item.model}</p>
-                        {item.cue ? (
-                          <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-                            {item.cue}
-                          </span>
-                        ) : null}
-                      </div>
+                      <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300/78">{system.description}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-right">
+                      <p className="text-xs uppercase tracking-[0.24em] text-white/45">Confidence</p>
+                      <p className="mt-2 text-2xl font-semibold text-white">{Math.round(system.confidence * 100)}%</p>
                     </div>
                   </div>
-                </article>
-              ))}
-            </div>
-          </aside>
-        </section>
 
-        <section
-          ref={resultsRef}
-          className={`grid gap-6 xl:grid-cols-[0.62fr_1.38fr] ${
-            audit ? "fade-rise" : ""
-          }`}
-        >
-          <article className="panel-shell">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-200">
-                  Portfolio Metric
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold text-slate-50">
-                  Repo-level risk concentration
-                </h2>
-              </div>
-              <Scale className="h-6 w-6 text-sky-200" />
-            </div>
-
-            {!audit && !isRunningWithoutResults ? (
-              <div className="mt-6 rounded-[28px] border border-dashed border-white/10 bg-white/[0.03] p-6 text-sm leading-7 text-slate-400">
-                Run an audit to compute the deterministic portfolio risk index and surface the
-                detected AI systems inventory.
-              </div>
-            ) : null}
-
-            {isRunningWithoutResults ? (
-              <div className="mt-6 grid gap-4 fade-rise">
-                <div className="relative overflow-hidden rounded-[30px] border border-sky-400/20 bg-slate-950/55 p-6">
-                  <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.22),_transparent_60%)]" />
-                  <div className="relative">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      Audit running
-                    </p>
-                    <div className="mt-3 flex items-end gap-4">
-                      <span className="text-6xl font-semibold tracking-tight text-sky-100">
-                        {Math.round(progress)}
-                      </span>
-                      <span className="pb-2 text-lg text-slate-400">%</span>
+                  <div className="mt-5 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-white/45">Primary article</p>
+                      <p className="mt-2 text-sm font-semibold text-white">{system.primary_article}</p>
                     </div>
-                    <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/8">
-                      <div
-                        className="progress-shell h-full rounded-full"
-                        style={{ width: `${progress}%` }}
-                      />
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-white/45">Deadline</p>
+                      <p className="mt-2 text-sm font-semibold text-white">{formatDateLabel(system.deadline_iso ?? system.deadline)}</p>
                     </div>
                   </div>
-                </div>
 
-                <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5 text-sm leading-7 text-slate-300">
-                  <p className="font-semibold text-slate-50">{currentStage.label}</p>
-                  <p className="mt-2">{currentStage.detail}</p>
-                  <p className="mt-4 text-slate-400">
-                    Portfolio scoring and AI system cards will populate as soon as the synchronous
-                    audit response returns.
-                  </p>
-                </div>
-              </div>
-            ) : null}
-
-            {audit ? (
-              <div className="mt-6 grid gap-4 fade-rise">
-                <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-slate-950/50 p-6">
-                  <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.22),_transparent_60%)]" />
-                  <div className="relative">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      Portfolio Risk Index
-                    </p>
-                    <div className="mt-3 flex items-end gap-4">
-                      <span
-                        className={`text-6xl font-semibold tracking-tight ${riskIndexTone(audit.portfolio_risk_index)}`}
-                      >
-                        {audit.portfolio_risk_index}
-                      </span>
-                      <span className="pb-2 text-lg text-slate-400">/ 100</span>
-                    </div>
-                    <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/8">
-                      <div
-                        className="h-full rounded-full bg-[linear-gradient(90deg,rgba(16,185,129,0.95)_0%,rgba(56,189,248,0.95)_42%,rgba(245,158,11,0.95)_72%,rgba(244,63,94,0.95)_100%)] transition-[width] duration-700"
-                        style={{ width: `${audit.portfolio_risk_index}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5 text-sm">
-                  <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="mt-5 grid gap-4 lg:grid-cols-2">
                     <div>
-                      <p className="text-slate-400">Audit ID</p>
-                      <p className="mt-1 font-mono text-xs text-slate-100 md:text-sm">
-                        {audit.audit_id}
-                      </p>
-                      <p className="mt-5 leading-7 text-slate-300">{audit.summary}</p>
-                    </div>
-                    <div className="flex min-w-[220px] flex-col items-start gap-3 xl:items-end">
-                      <div className="text-left xl:text-right">
-                        <p className="text-slate-400">Status</p>
-                        <p className="mt-1 font-semibold text-emerald-100">{audit.status}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void runCompliancePack();
-                        }}
-                        disabled={isCompliancePackRunning}
-                        className="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 transition hover:border-sky-300/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isCompliancePackRunning ? (
-                          <>
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                            Generating Compliance Pack...
-                          </>
-                        ) : (
-                          <>
-                            Generate Compliance Pack
-                            <ArrowRight className="h-4 w-4" />
-                          </>
-                        )}
-                      </button>
-                      {compliancePack ? (
-                        <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-left text-xs leading-6 text-emerald-100 xl:text-right">
-                          <p className="font-semibold uppercase tracking-[0.16em] text-emerald-100/90">
-                            Latest pack
-                          </p>
-                          <p className="mt-1">
-                            Score {compliancePack.compliance_score}/100 - {compliancePack.gaps.length} gap(s)
-                          </p>
-                        </div>
-                      ) : (
-                        <p className="max-w-[220px] text-left text-xs leading-6 text-slate-400 xl:text-right">
-                          Generate the D4B pack to compute disclosure notices, compliance score,
-                          and remediation priorities.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </article>
-
-          <article className="panel-shell">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-200">
-                  AI Systems Inventory
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold text-slate-50">
-                  Evidence-backed system cards for Scanner plus Classifier
-                </h2>
-              </div>
-              <FileSearch className="h-6 w-6 text-sky-200" />
-            </div>
-
-            {!audit && !isRunningWithoutResults ? (
-              <div className="mt-6 rounded-[28px] border border-dashed border-white/10 bg-white/[0.03] p-6 text-sm leading-7 text-slate-400">
-                The inventory panel will populate with detected AI systems, evidence trails, risk
-                badges, article references, confidence, and deadlines after the audit finishes.
-              </div>
-            ) : null}
-
-            {isRunningWithoutResults ? (
-              <div className="mt-6 grid gap-4 fade-rise">
-                {[0, 1].map((placeholder) => (
-                  <article
-                    key={`loading-card-${placeholder}`}
-                    className="rounded-[28px] border border-sky-400/20 bg-slate-950/45 p-5"
-                  >
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <div className="h-7 w-44 rounded-full bg-white/10" />
-                          <div className="cockpit-pulse rounded-full border border-sky-400/20 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-100">
-                            {placeholder === 0 ? "Scanner active" : "Classifier queued"}
-                          </div>
-                        </div>
-                        <div className="mt-4 grid gap-2">
-                          <div className="h-4 w-full rounded-full bg-white/8" />
-                          <div className="h-4 w-11/12 rounded-full bg-white/8" />
-                          <div className="h-4 w-8/12 rounded-full bg-white/8" />
-                        </div>
-                      </div>
-                      <div className="grid gap-3 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 text-sm xl:min-w-[250px]">
-                        <div className="h-4 w-28 rounded-full bg-white/8" />
-                        <div className="h-4 w-36 rounded-full bg-white/8" />
-                        <div className="h-4 w-24 rounded-full bg-white/8" />
-                      </div>
-                    </div>
-
-                    <div className="mt-5 grid gap-4 lg:grid-cols-[0.78fr_1.22fr]">
-                      <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-                        <div className="h-4 w-28 rounded-full bg-white/8" />
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <div className="h-7 w-36 rounded-full bg-sky-500/10" />
-                          <div className="h-7 w-32 rounded-full bg-sky-500/10" />
-                          <div className="h-7 w-40 rounded-full bg-sky-500/10" />
-                        </div>
-                      </div>
-                      <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-                        <div className="h-4 w-40 rounded-full bg-white/8" />
-                        <div className="mt-4 grid gap-2">
-                          <div className="h-4 w-full rounded-full bg-white/8" />
-                          <div className="h-4 w-10/12 rounded-full bg-white/8" />
-                          <div className="h-4 w-7/12 rounded-full bg-white/8" />
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : null}
-
-            {audit ? (
-              <div className="mt-6 grid gap-4 fade-rise">
-                {audit.systems.map((system) => {
-                  const documentationResponse = documentationMap[system.id];
-                  const artifact =
-                    documentationResponse?.artifact ?? annexIvArtifactMap[system.id] ?? null;
-                  const documentationError = documentationErrors[system.id];
-                  const isDocumentationLoading = documentationLoadingId === system.id;
-                  const disclosure = disclosureMap[system.id];
-
-                  return (
-                    <article
-                      key={system.id}
-                      className="rounded-[28px] border border-white/10 bg-slate-950/45 p-5 shadow-[0_20px_70px_rgba(3,10,20,0.35)]"
-                    >
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <h3 className="text-xl font-semibold text-slate-50">{system.name}</h3>
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${riskTone[system.risk_class]}`}
-                          >
-                            {system.risk_class.replace("_", " ")}
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">Source files</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {system.source_files.map((file) => (
+                          <span key={file} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-slate-200/75">
+                            {file}
                           </span>
-                          {system.triggers_article_50 ? (
-                            <span className="rounded-full bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-100 ring-1 ring-sky-400/30">
-                              Article 50 trigger
-                            </span>
-                          ) : null}
-                          {system.triggers_article_50 ? (
-                            disclosure?.requires_disclosure ? (
-                              <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100 ring-1 ring-emerald-300/30">
-                                Disclosure ready
-                              </span>
-                            ) : compliancePack ? (
-                              <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100 ring-1 ring-amber-300/30">
-                                Disclosure pending
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300 ring-1 ring-white/10">
-                                Disclosure status pending
-                              </span>
-                            )
-                          ) : null}
-                        </div>
-                        <p className="mt-3 max-w-4xl text-sm leading-7 text-slate-300">
-                          {system.description}
-                        </p>
-                        <div className="mt-4 flex flex-wrap items-center gap-3">
-                          {system.risk_class === "HIGH_RISK" ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void runDocumentationForSystem({
-                                  auditId: audit.audit_id,
-                                  aiSystemId: system.id,
-                                  systemName: system.name,
-                                  systemDescription: system.description,
-                                  riskClass: system.risk_class,
-                                  primaryArticle: system.primary_article,
-                                  sourceFiles: system.source_files,
-                                  detectionSignals: system.detection_signals,
-                                  repoUrl: audit.repo_url,
-                                });
-                              }}
-                              disabled={isDocumentationLoading}
-                              className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {isDocumentationLoading ? (
-                                <>
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                                  Generating Annex IV...
-                                </>
-                              ) : (
-                                "Generate Annex IV PDF"
-                              )}
-                            </button>
-                          ) : (
-                            <span className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">
-                              Annex IV not required
-                            </span>
-                          )}
-
-                          {artifact ? (
-                            <a
-                              href={artifact.download_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sm font-semibold text-sky-100 underline decoration-sky-300/50 underline-offset-4"
-                            >
-                              Download Annex IV PDF
-                            </a>
-                          ) : null}
-
-                          {documentationResponse?.mode ? (
-                            <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">
-                              {documentationResponse.mode} mode
-                            </span>
-                          ) : null}
-                        </div>
-                        {documentationResponse?.message ? (
-                          <p className="mt-3 text-sm leading-6 text-slate-400">
-                            {documentationResponse.message}
-                          </p>
-                        ) : null}
-                        {documentationError ? (
-                          <div className="mt-3 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                            {documentationError}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="grid gap-3 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 text-sm xl:min-w-[250px]">
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="text-slate-400">Confidence</span>
-                          <span className="font-semibold text-slate-100">
-                            {Math.round(system.confidence * 100)}%
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="text-slate-400">Primary article</span>
-                          <span className="text-right text-slate-100">{system.primary_article}</span>
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <span className="text-slate-400">Deadline</span>
-                          <span className="max-w-[160px] text-right text-slate-100">
-                            {system.deadline}
-                          </span>
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <span className="text-slate-400">Disclosure</span>
-                          <span className="max-w-[160px] text-right text-slate-100">
-                            {system.triggers_article_50
-                              ? disclosure?.requires_disclosure
-                                ? disclosure.article ?? "Required"
-                                : compliancePack
-                                  ? "Pending rollout"
-                                  : "Awaiting pack"
-                              : "Not required"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 grid gap-4 lg:grid-cols-[0.78fr_1.22fr]">
-                      <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.16em] text-slate-300">
-                          <Eye className="h-4 w-4 text-sky-200" />
-                          Evidence Trail
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {system.detection_signals.map((signal) => (
-                            <span
-                              key={signal}
-                              className="rounded-full border border-sky-400/20 bg-sky-500/10 px-3 py-1 text-xs leading-5 text-sky-100"
-                            >
-                              {signal}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <div>
-                            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-300">
-                              Source Files
-                            </p>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {system.source_files.map((sourceFile) => (
-                                <span
-                                  key={sourceFile}
-                                  className="rounded-full border border-white/10 bg-slate-950/45 px-3 py-1 text-xs font-mono text-slate-200"
-                                >
-                                  {sourceFile}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-300">
-                              Secondary Articles
-                            </p>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {system.secondary_articles.length > 0 ? (
-                                system.secondary_articles.map((article) => (
-                                  <span
-                                    key={article}
-                                    className="rounded-full border border-white/10 bg-slate-950/45 px-3 py-1 text-xs text-slate-200"
-                                  >
-                                    {article}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="text-sm text-slate-400">None</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="mt-5 rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
-                          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-300">
-                            Classification Reasoning
-                          </p>
-                          <p className="mt-3 text-sm leading-7 text-slate-300">
-                            {system.reasoning}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                  );
-                })}
-              </div>
-            ) : null}
-          </article>
-        </section>
-
-        <section className="panel-shell">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-200">
-                Compliance Pack
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-slate-50">
-                Disclosure coverage, gap matrix, and compliance score
-              </h2>
-            </div>
-            <p className="max-w-2xl text-sm leading-7 text-slate-400">
-              Generate the D4B pack after the audit to compute a deterministic compliance score,
-              estimate scenario-based fine exposure, and produce Article 50 notices when the
-              systems inventory requires them.
-            </p>
-          </div>
-
-          {!audit ? (
-            <div className="mt-6 rounded-[28px] border border-dashed border-white/10 bg-white/[0.03] p-6 text-sm leading-7 text-slate-400">
-              Run an audit first, then generate the compliance pack to surface disclosure status,
-              severity-ranked gaps, and remediation priorities.
-            </div>
-          ) : null}
-
-          {audit && isCompliancePackRunning ? (
-            <div className="mt-6 grid gap-4 fade-rise lg:grid-cols-[0.74fr_1.26fr]">
-              <div className="rounded-[28px] border border-sky-400/20 bg-slate-950/55 p-6">
-                <div className="flex items-center gap-3 text-sm font-semibold uppercase tracking-[0.18em] text-sky-100">
-                  <span className="live-dot h-2.5 w-2.5 rounded-full bg-sky-300" />
-                  Compliance Pack running
-                </div>
-                <p className="mt-4 text-4xl font-semibold tracking-tight text-slate-50">
-                  Disclosure + Gap Auditor
-                </p>
-                <p className="mt-3 text-sm leading-7 text-slate-300">
-                  Generating multilingual notices, checking Annex IV coverage, and computing the
-                  deterministic compliance score.
-                </p>
-                <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/8">
-                  <div className="progress-shell h-full rounded-full" style={{ width: "82%" }} />
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                {["Compliance score", "Estimated exposure", "Gap matrix", "Priority actions"].map(
-                  (placeholder) => (
-                    <div
-                      key={placeholder}
-                      className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5"
-                    >
-                      <div className="h-4 w-40 rounded-full bg-white/8" />
-                      <div className="mt-4 h-12 w-24 rounded-full bg-sky-500/10" />
-                      <div className="mt-5 grid gap-2">
-                        <div className="h-4 w-full rounded-full bg-white/8" />
-                        <div className="h-4 w-10/12 rounded-full bg-white/8" />
-                        <div className="h-4 w-8/12 rounded-full bg-white/8" />
-                      </div>
-                    </div>
-                  ),
-                )}
-              </div>
-            </div>
-          ) : null}
-
-          {audit && compliancePackError ? (
-            <div className="mt-6 rounded-[28px] border border-rose-400/30 bg-rose-500/10 p-5 text-sm leading-7 text-rose-100 fade-rise">
-              {compliancePackError}
-            </div>
-          ) : null}
-
-          {audit && !compliancePack && !isCompliancePackRunning && !compliancePackError ? (
-            <div className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-sm leading-7 text-slate-300">
-              <p className="font-semibold text-slate-50">No compliance pack generated yet</p>
-              <p className="mt-2">
-                Use the action above to generate Article 50 notices where needed, score the audit,
-                and persist a gap snapshot into Postgres.
-              </p>
-            </div>
-          ) : null}
-
-          {audit && compliancePack ? (
-            <div className="mt-6 grid gap-6 fade-rise">
-              <div className="grid gap-4 xl:grid-cols-4">
-                <article className="relative overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/50 p-6">
-                  <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),_transparent_60%)]" />
-                  <div className="relative">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      Compliance Score
-                    </p>
-                    <div className="mt-3 flex items-end gap-4">
-                      <span
-                        className={`text-6xl font-semibold tracking-tight ${complianceScoreTone(compliancePack.compliance_score)}`}
-                      >
-                        {compliancePack.compliance_score}
-                      </span>
-                      <span className="pb-2 text-lg text-slate-400">/ 100</span>
-                    </div>
-                    <p className="mt-3 text-sm font-medium text-slate-300">
-                      {complianceScoreBand(compliancePack.compliance_score)}
-                    </p>
-                  </div>
-                </article>
-
-                <article className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Estimated Fine Exposure
-                  </p>
-                  <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-50">
-                    {formatEuros(compliancePack.estimated_fine_exposure_eur)}
-                  </p>
-                  <p className="mt-3 text-sm leading-6 text-slate-400">
-                    Scenario-based heuristic for demo purposes only, not legal advice.
-                  </p>
-                </article>
-
-                <article className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Time-to-Compliant
-                  </p>
-                  <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-50">
-                    {compliancePack.time_to_compliant_days}
-                  </p>
-                  <p className="mt-3 text-sm leading-6 text-slate-400">
-                    Days until the earliest relevant compliance deadline in the current pack.
-                  </p>
-                </article>
-
-                <article className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Coverage snapshot
-                  </p>
-                  <div className="mt-4 grid gap-3 text-sm text-slate-300">
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Systems</span>
-                      <span className="font-semibold text-slate-100">
-                        {compliancePack.systems_count}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <span>High-risk</span>
-                      <span className="font-semibold text-slate-100">
-                        {compliancePack.high_risk_count}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Article 50</span>
-                      <span className="font-semibold text-slate-100">
-                        {compliancePack.article_50_count}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <span>Open gaps</span>
-                      <span className="font-semibold text-slate-100">
-                        {compliancePack.gaps.length}
-                      </span>
-                    </div>
-                  </div>
-                </article>
-              </div>
-
-              <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  Compliance summary
-                </p>
-                <p className="mt-4 max-w-4xl text-sm leading-7 text-slate-300">
-                  {compliancePack.summary}
-                </p>
-              </div>
-
-              <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-                <div className="grid gap-6">
-                  <article className="rounded-[28px] border border-white/10 bg-slate-950/45 p-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
-                          Gap Matrix
-                        </p>
-                        <h3 className="mt-2 text-xl font-semibold text-slate-50">
-                          Severity-ranked remediation backlog
-                        </h3>
-                      </div>
-                      <Scale className="h-5 w-5 text-sky-200" />
-                    </div>
-
-                    <div className="mt-5 grid gap-3 md:grid-cols-4">
-                      {(["CRITICAL", "HIGH", "MEDIUM", "LOW"] as GapSeverity[]).map((severity) => (
-                        <div
-                          key={severity}
-                          className={`rounded-[22px] px-4 py-4 text-sm ${gapSeverityTone[severity]}`}
-                        >
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em]">
-                            {severity}
-                          </p>
-                          <p className="mt-3 text-3xl font-semibold tracking-tight">
-                            {complianceGapCounts[severity]}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-5 grid gap-3">
-                      {compliancePack.gaps.length > 0 ? (
-                        compliancePack.gaps.map((gap, index) => (
-                          <article
-                            key={`${gap.title}-${index}`}
-                            className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4"
-                          >
-                            <div className="flex flex-wrap items-center gap-3">
-                              <span
-                                className={`rounded-full px-3 py-1 text-xs font-semibold ${gapSeverityTone[gap.severity]}`}
-                              >
-                                {gap.severity}
-                              </span>
-                              <h4 className="text-base font-semibold text-slate-50">{gap.title}</h4>
-                            </div>
-                            <p className="mt-3 text-sm leading-7 text-slate-300">
-                              {gap.description}
-                            </p>
-                            <div className="mt-4 grid gap-3 md:grid-cols-2">
-                              <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
-                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                  Recommended action
-                                </p>
-                                <p className="mt-2 leading-6">{gap.recommended_action}</p>
-                              </div>
-                              <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
-                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                  Legal reference
-                                </p>
-                                <p className="mt-2 leading-6">{gap.legal_reference}</p>
-                              </div>
-                            </div>
-                          </article>
-                        ))
-                      ) : (
-                        <div className="rounded-[22px] border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm leading-7 text-emerald-100">
-                          No open gaps were generated for this compliance pack snapshot.
-                        </div>
-                      )}
-                    </div>
-                  </article>
-                </div>
-
-                <div className="grid gap-6">
-                  <article className="rounded-[28px] border border-white/10 bg-slate-950/45 p-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
-                          Priority Actions
-                        </p>
-                        <h3 className="mt-2 text-xl font-semibold text-slate-50">
-                          First remediation moves
-                        </h3>
-                      </div>
-                      <Sparkles className="h-5 w-5 text-sky-200" />
-                    </div>
-                    <div className="mt-5 grid gap-3">
-                      {compliancePack.priority_actions.length > 0 ? (
-                        compliancePack.priority_actions.map((action) => (
-                          <div
-                            key={action}
-                            className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-7 text-slate-300"
-                          >
-                            {action}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-7 text-slate-400">
-                          Priority actions will appear here after the compliance pack is generated.
-                        </div>
-                      )}
-                    </div>
-                  </article>
-
-                  <article className="rounded-[28px] border border-white/10 bg-slate-950/45 p-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-200">
-                          Article 50 Notices
-                        </p>
-                        <h3 className="mt-2 text-xl font-semibold text-slate-50">
-                          Multilingual deployer-ready disclosures
-                        </h3>
-                      </div>
-                      <Eye className="h-5 w-5 text-sky-200" />
-                    </div>
-
-                    {compliancePack.disclosures.length === 0 ? (
-                      <div className="mt-5 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 text-sm leading-7 text-slate-300">
-                        {compliancePack.article_50_count === 0
-                          ? "No Article 50 disclosures were required for this audit."
-                          : "Disclosure-ready systems were detected, but no notices were returned in this pack."}
-                      </div>
-                    ) : (
-                      <div className="mt-5 grid gap-4">
-                        {compliancePack.disclosures.map((disclosure) => (
-                          <article
-                            key={disclosure.ai_system_id}
-                            className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4"
-                          >
-                            <div className="flex flex-wrap items-center gap-3">
-                              <span className="rounded-full bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-100 ring-1 ring-sky-400/30">
-                                {disclosure.article ?? "Article 50"}
-                              </span>
-                              <span className="rounded-full border border-white/10 bg-slate-950/45 px-3 py-1 text-xs font-mono text-slate-300">
-                                {disclosure.ai_system_id}
-                              </span>
-                            </div>
-                            <div className="mt-4 grid gap-3 md:grid-cols-2">
-                              {disclosure.notices ? (
-                                ([
-                                  ["EN", disclosure.notices.en],
-                                  ["IT", disclosure.notices.it],
-                                  ["ES", disclosure.notices.es],
-                                  ["FR", disclosure.notices.fr],
-                                  ["DE", disclosure.notices.de],
-                                ] as const).map(([language, notice]) => (
-                                  <div
-                                    key={`${disclosure.ai_system_id}-${language}`}
-                                    className="rounded-2xl border border-white/10 bg-slate-950/45 p-4"
-                                  >
-                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                      {language}
-                                    </p>
-                                    <p className="mt-3 text-sm leading-7 text-slate-300">
-                                      {notice}
-                                    </p>
-                                  </div>
-                                ))
-                              ) : (
-                                <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 text-sm leading-7 text-slate-400 md:col-span-2">
-                                  No notice body is available for this disclosure.
-                                </div>
-                              )}
-                            </div>
-                            {disclosure.placement_recommendations.length > 0 ? (
-                              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                  Placement recommendations
-                                </p>
-                                <div className="mt-3 grid gap-2">
-                                  {disclosure.placement_recommendations.map((recommendation) => (
-                                    <p
-                                      key={recommendation}
-                                      className="text-sm leading-7 text-slate-300"
-                                    >
-                                      {recommendation}
-                                    </p>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : null}
-                          </article>
                         ))}
                       </div>
-                    )}
-                  </article>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </section>
-
-        <section className="panel-shell">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-200">
-                What&apos;s Next
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-slate-50">
-                The console already frames the full six-agent product
-              </h2>
-            </div>
-            <p className="max-w-2xl text-sm leading-7 text-slate-400">
-              D4B keeps the main audit path synchronous, then layers Annex IV artifacts,
-              multilingual Article 50 notices, and a deterministic compliance score on top. The
-              Monitor agent remains visible as the final loop that lands later.
-            </p>
-          </div>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {[
-              {
-                title: "Documentation live",
-                icon: FileSearch,
-                body: "Annex IV structured output and PDF generation are now available directly from every high-risk system card.",
-              },
-              {
-                title: "Disclosure live",
-                icon: Eye,
-                body: "Article 50 notice generation now adds multilingual deployer-facing notices and placement guidance.",
-              },
-              {
-                title: "Gap Auditor live",
-                icon: Scale,
-                body: "Compliance packs now compute score, exposure, severity-ranked gaps, and priority actions.",
-              },
-              {
-                title: "Monitor soon",
-                icon: BellRing,
-                body: "Deadline alerts and post-audit monitoring will complete the operating loop.",
-              },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <article
-                  key={item.title}
-                  className="rounded-[26px] border border-white/10 bg-slate-950/40 p-5 transition hover:border-sky-400/25 hover:bg-slate-950/55"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-sky-500/10">
-                      <Icon className="h-5 w-5 text-sky-100" />
                     </div>
-                    <h3 className="text-lg font-semibold text-slate-50">{item.title}</h3>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">Evidence trail</p>
+                      <div className="mt-3 space-y-2">
+                        {system.detection_signals.map((signal) => (
+                          <div key={signal} className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm leading-7 text-slate-200/80">
+                            {signal}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                  <p className="mt-4 text-sm leading-7 text-slate-300">{item.body}</p>
+
+                  <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto]">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-white/45">Disclosure status</p>
+                      <p className="mt-2 text-sm font-semibold text-white">
+                        {system.triggers_article_50
+                          ? disclosure?.requires_disclosure
+                            ? `Article 50 notice ready · ${disclosure.article}`
+                            : "Disclosure required but not yet generated."
+                          : "Article 50 disclosure not required."}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-stretch gap-2">
+                      {system.risk_class === "HIGH_RISK" ? (
+                        annexIvArtifact ? (
+                          <a
+                            href={annexIvArtifact.download_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/30 bg-sky-500/12 px-4 py-3 text-sm font-semibold text-sky-100 transition hover:border-sky-200/45 hover:bg-sky-500/18"
+                          >
+                            <FileDown className="h-4 w-4" />
+                            Download Annex IV PDF
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleGenerateAnnexIv(system.id)}
+                            disabled={documentationBusySystemId === system.id}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(120deg,#1d4ed8_0%,#0284c7_55%,#0ea5e9_100%)] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(14,165,233,0.24)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {documentationBusySystemId === system.id ? (
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <FileBadge2 className="h-4 w-4" />
+                            )}
+                            {documentationBusySystemId === system.id ? "Generating Annex IV..." : "Generate Annex IV PDF"}
+                          </button>
+                        )
+                      ) : (
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm font-semibold text-slate-200/70">
+                          Annex IV not required
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <details className="mt-5 rounded-[26px] border border-white/10 bg-white/[0.03] p-4">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-white">
+                      <span className="inline-flex items-center gap-2">
+                        <Eye className="h-4 w-4 text-sky-200" />
+                        Why this classification?
+                      </span>
+                      <ChevronRight className="h-4 w-4 text-white/55" />
+                    </summary>
+                    <div className="mt-4 space-y-4 text-sm leading-7 text-slate-200/80">
+                      <p>{system.reasoning}</p>
+                      {system.secondary_articles.length ? (
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.24em] text-white/45">Secondary references</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {system.secondary_articles.map((reference) => (
+                              <span key={reference} className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-slate-200/75">
+                                {reference}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </details>
+
+                  {systemGaps.length ? (
+                    <div className="mt-5">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">System gaps</p>
+                      <div className="mt-3 space-y-2">
+                        {systemGaps.map((gap) => (
+                          <div key={`${gap.category}-${gap.description}`} className={`rounded-2xl border px-3 py-3 text-sm leading-7 ${gapTone(gap.severity as ComplianceGap["severity"])}`}>
+                            <p className="font-semibold">{gap.category}</p>
+                            <p className="mt-1 text-slate-100/80">{gap.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </article>
               );
             })}
           </div>
-        </section>
-      </div>
+        ) : (
+          <div className="mt-6 rounded-[30px] border border-dashed border-white/15 bg-black/20 p-8 text-sm leading-7 text-slate-300/72">
+            Once an orchestrated audit completes, this inventory will show each detected AI system with source files, evidence trail, legal mapping, and artifact status.
+          </div>
+        )}
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
+        <div className="panel-shell fade-rise">
+          <div className="flex items-center gap-3">
+            <GanttChartSquare className="h-5 w-5 text-sky-200" />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Compliance Pack</p>
+              <h2 className="mt-1 text-2xl font-semibold text-white">Score, gaps, and remediation matrix</h2>
+            </div>
+          </div>
+
+          {compliancePack ? (
+            <div className="mt-5 space-y-5">
+              <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                <p className="text-sm leading-8 text-slate-100/85">{compliancePack.summary}</p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {(["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const).map((severity) => (
+                  <div key={severity} className={`rounded-2xl border p-4 ${gapTone(severity)}`}>
+                    <p className="text-xs uppercase tracking-[0.24em]">{severity}</p>
+                    <p className="mt-3 text-3xl font-semibold">{gapCounts[severity]}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                {compliancePack.gaps.map((gap, index) => (
+                  <article key={`${gap.title}-${index}`} className={`rounded-[26px] border p-4 ${gapTone(gap.severity)}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-sm font-semibold">{gap.title}</p>
+                      <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em]">
+                        {gap.severity}
+                      </span>
+                    </div>
+                    <p className="mt-3 text-sm leading-7 text-slate-100/82">{gap.description}</p>
+                    <p className="mt-3 text-xs uppercase tracking-[0.22em] text-white/50">{gap.legal_reference}</p>
+                    <p className="mt-2 text-sm leading-7 text-slate-100/78">{gap.recommended_action}</p>
+                  </article>
+                ))}
+              </div>
+
+              <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                <p className="text-xs uppercase tracking-[0.24em] text-white/45">Priority actions</p>
+                <div className="mt-3 space-y-2">
+                  {compliancePack.priority_actions.map((action) => (
+                    <div key={action} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm leading-7 text-slate-100/82">
+                      <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-sky-200" />
+                      <span>{action}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[28px] border border-dashed border-white/15 bg-black/20 p-6 text-sm leading-7 text-slate-300/72">
+              The compliance pack appears here after the orchestrated audit, or you can refresh it manually for the active audit.
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-6">
+          <div className="panel-shell fade-rise">
+            <div className="flex items-center gap-3">
+              <Languages className="h-5 w-5 text-sky-200" />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Article 50 notices</p>
+                <h2 className="mt-1 text-2xl font-semibold text-white">Multilingual disclosure vault</h2>
+              </div>
+            </div>
+            {compliancePack?.disclosures.length ? (
+              <div className="mt-5 space-y-4">
+                {compliancePack.disclosures.map((disclosure) => {
+                  const targetSystem = systems.find((system) => system.id === disclosure.ai_system_id);
+                  return (
+                    <article key={disclosure.ai_system_id} className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{targetSystem?.name ?? disclosure.ai_system_id}</p>
+                          <p className="mt-1 text-xs uppercase tracking-[0.24em] text-sky-100/60">{disclosure.article}</p>
+                        </div>
+                        <div className="rounded-full border border-emerald-300/30 bg-emerald-500/12 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100">
+                          Ready
+                        </div>
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                        {LANGUAGE_LABELS.map((language) => (
+                          <div key={language.key} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                            <p className="text-[11px] uppercase tracking-[0.24em] text-white/45">{language.label}</p>
+                            <p className="mt-2 text-sm leading-7 text-slate-100/82">
+                              {disclosure.notices ? disclosure.notices[language.key] : "Not generated"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {disclosure.placement_recommendations.map((placement) => (
+                          <div key={placement} className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm leading-7 text-slate-100/78">
+                            {placement}
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-5 rounded-[28px] border border-dashed border-white/15 bg-black/20 p-6 text-sm leading-7 text-slate-300/72">
+                No Article 50 systems require disclosure in the current audit. When a generative or user-facing system is detected, the multilingual notices appear here in English, Italian, Spanish, French, and German.
+              </div>
+            )}
+          </div>
+
+          <div className="panel-shell fade-rise">
+            <div className="flex items-center gap-3">
+              <Clock3 className="h-5 w-5 text-sky-200" />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Regulatory timeline</p>
+                <h2 className="mt-1 text-2xl font-semibold text-white">Board-facing deadlines</h2>
+              </div>
+            </div>
+            {executiveSummary?.regulatory_timeline.length ? (
+              <div className="mt-5 space-y-4">
+                {executiveSummary.regulatory_timeline.map((entry) => (
+                  <div key={`${entry.date}-${entry.label}`} className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.24em] text-white/45">{formatDateLabel(entry.date)}</p>
+                        <p className="mt-2 text-lg font-semibold text-white">{entry.label}</p>
+                      </div>
+                      <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-slate-200/70">
+                        {entry.affected_systems.length} system{entry.affected_systems.length === 1 ? "" : "s"}
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {entry.affected_systems.map((systemName) => (
+                        <span key={systemName} className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-slate-200/75">
+                          {systemName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-5 rounded-[28px] border border-dashed border-white/15 bg-black/20 p-6 text-sm leading-7 text-slate-300/72">
+                The regulatory timeline will highlight Article 50 and Annex III milestones after the orchestrated audit completes.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <div className="panel-shell fade-rise">
+          <div className="flex items-center gap-3">
+            <Radar className="h-5 w-5 text-sky-200" />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Monitor Agent</p>
+              <h2 className="mt-1 text-2xl font-semibold text-white">Deadline and control intelligence</h2>
+            </div>
+          </div>
+
+          {orchestratedResult?.monitor.alerts.length ? (
+            <div className="mt-5 space-y-3">
+              {orchestratedResult.monitor.alerts.map((alert, index) => (
+                <article key={`${alert.type}-${index}-${alert.title}`} className={`rounded-[26px] border p-4 ${monitorTone(alert.severity)}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-semibold">{alert.title}</p>
+                    <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em]">
+                      {alert.severity}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm leading-7 text-slate-100/82">{alert.description}</p>
+                  <p className="mt-3 text-xs uppercase tracking-[0.22em] text-white/50">{alert.type}</p>
+                  <p className="mt-2 text-sm leading-7 text-slate-100/78">{alert.recommended_action}</p>
+                  {alert.deadline_iso ? (
+                    <p className="mt-3 text-xs uppercase tracking-[0.22em] text-white/55">Deadline {formatDateLabel(alert.deadline_iso)}</p>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[28px] border border-dashed border-white/15 bg-black/20 p-6 text-sm leading-7 text-slate-300/72">
+              The Monitor Agent will publish deadline approach alerts, missing-control findings, and regulatory roadmap notes after the orchestrated audit completes.
+            </div>
+          )}
+        </div>
+
+        <div className="panel-shell fade-rise">
+          <div className="flex items-center gap-3">
+            <FolderKanban className="h-5 w-5 text-sky-200" />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Evidence Vault</p>
+              <h2 className="mt-1 text-2xl font-semibold text-white">Traceable legal and technical evidence</h2>
+            </div>
+          </div>
+
+          {evidenceVault ? (
+            <div className="mt-5 space-y-5">
+              {evidenceVault.systems.map((system) => (
+                <article key={system.id} className="rounded-[30px] border border-white/10 bg-black/20 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <p className="text-lg font-semibold text-white">{system.name}</p>
+                      <p className="mt-2 text-sm leading-7 text-slate-200/76">{system.description}</p>
+                    </div>
+                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] ${riskTone((system.risk_class as RiskClass | null) ?? "MINIMAL_RISK")}`}>
+                      {system.risk_class?.replaceAll("_", " ") ?? "Pending"}
+                    </span>
+                  </div>
+
+                  <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.24em] text-white/45">Legal mapping</p>
+                      <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-7 text-slate-100/82">
+                        <p><span className="font-semibold text-white">Primary:</span> {system.primary_article ?? "Not assigned"}</p>
+                        <p className="mt-2"><span className="font-semibold text-white">Deadline:</span> {formatDateLabel(system.deadline_iso ?? system.deadline)}</p>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.24em] text-white/45">Generated artifacts</p>
+                      <div className="mt-3 grid gap-3">
+                        {system.artifacts.length ? (
+                          system.artifacts.map((artifact) => <ArtifactChip key={artifact.artifact_id} artifact={artifact} />)
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-4 text-sm text-slate-300/72">
+                            No artifacts recorded yet for this system.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.24em] text-white/45">Source files</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {system.source_files.map((file) => (
+                          <span key={file} className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-slate-200/75">
+                            {file}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.24em] text-white/45">Detection signals</p>
+                      <div className="mt-3 space-y-2">
+                        {system.detection_signals.map((signal) => (
+                          <div key={signal} className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm leading-7 text-slate-100/80">
+                            {signal}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <details className="mt-5 rounded-[26px] border border-white/10 bg-white/[0.03] p-4">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-white">
+                      <span className="inline-flex items-center gap-2">
+                        <BrainCircuit className="h-4 w-4 text-sky-200" />
+                        Why this classification?
+                      </span>
+                      <ChevronRight className="h-4 w-4 text-white/55" />
+                    </summary>
+                    <div className="mt-4 space-y-4 text-sm leading-7 text-slate-100/82">
+                      <p>{system.reasoning ?? "No reasoning stored."}</p>
+                      {system.secondary_articles.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          {system.secondary_articles.map((reference) => (
+                            <span key={reference} className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-slate-200/75">
+                              {reference}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </details>
+
+                  <div className="mt-5">
+                    <p className="text-xs uppercase tracking-[0.24em] text-white/45">Agent run trace</p>
+                    <div className="mt-3 space-y-2">
+                      {system.agent_runs.map((run, index) => (
+                        <div key={`${run.agent_name}-${run.started_at}-${index}`} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-white">{run.agent_name}</p>
+                            <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-200/70">
+                              {run.status}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-xs uppercase tracking-[0.22em] text-white/45">
+                            {run.model ? `${run.model} · ` : ""}
+                            {formatDateTime(run.started_at)}
+                          </p>
+                          {run.error ? <p className="mt-2 text-sm text-rose-100/80">{run.error}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+              ))}
+
+              {artifacts?.artifacts.length ? (
+                <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                  <p className="text-xs uppercase tracking-[0.24em] text-white/45">Audit-level artifacts</p>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {artifacts.artifacts.map((artifact) => (
+                      <ArtifactChip key={artifact.artifact_id} artifact={artifact} />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[28px] border border-dashed border-white/15 bg-black/20 p-6 text-sm leading-7 text-slate-300/72">
+              The evidence vault assembles source files, detection signals, legal mapping, artifacts, gaps, disclosures, and agent traces into one defensible dossier.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="panel-shell fade-rise">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-white/45">Control-room posture</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">What this demo now proves</h2>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300/72">
+            D1 to D5 synchronous fallback kept intact.
+          </div>
+        </div>
+        <div className="mt-6 grid gap-4 lg:grid-cols-4">
+          {[
+            {
+              icon: ScanSearch,
+              title: "Repo-native evidence",
+              copy: "Scanner evidence survives through classification, documentation, disclosure, monitoring, and the vault.",
+            },
+            {
+              icon: FileSearch2,
+              title: "Legal traceability",
+              copy: "Each system carries source files, detection signals, legal reasoning, and artifact links.",
+            },
+            {
+              icon: Bot,
+              title: "Autonomous handoffs",
+              copy: "Six agents now coordinate under one orchestrator while streaming honest SSE progress.",
+            },
+            {
+              icon: ShieldCheck,
+              title: "Board-ready output",
+              copy: "Compliance score, fine exposure, timeline, readiness, and action plan land in one console.",
+            },
+          ].map((item) => (
+            <div key={item.title} className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+              <item.icon className="h-5 w-5 text-sky-200" />
+              <p className="mt-4 text-lg font-semibold text-white">{item.title}</p>
+              <p className="mt-3 text-sm leading-7 text-slate-200/76">{item.copy}</p>
+            </div>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }
-

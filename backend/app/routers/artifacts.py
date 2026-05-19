@@ -54,7 +54,14 @@ async def _fetch_artifact_row(db: AsyncSession, artifact_id: UUID) -> Artifact |
 def _build_artifact_summary(artifact: Artifact) -> ArtifactSummary:
     """Convert an Artifact ORM row into the public summary schema."""
 
-    file_name = Path(artifact.storage_url).name if artifact.storage_url else f"{artifact.kind}.bin"
+    if artifact.storage_url:
+        file_name = Path(artifact.storage_url).name
+    elif artifact.kind == "article_50_notice_json":
+        file_name = "article_50_notice.json"
+    elif artifact.kind == "annex_iv_pdf":
+        file_name = "annex_iv.pdf"
+    else:
+        file_name = f"{artifact.kind}.bin"
     created_at = artifact.created_at or datetime.now(timezone.utc)
     return ArtifactSummary(
         artifact_id=artifact.id,

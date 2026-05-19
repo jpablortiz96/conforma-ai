@@ -201,6 +201,27 @@ def test_classifier_fallback_generative_guardrail_does_not_append_minimal_risk_r
     assert "smallest solid classification is minimal risk" not in response.reasoning.lower()
 
 
+def test_classifier_guardrail_ignores_repo_url_only_recruitment_signal_for_generative_system() -> None:
+    """Repo-level recruitment keywords must not override system-specific generative evidence."""
+
+    response = classify_with_fallback(
+        "\n".join(
+            [
+                "AI system name: language_model_training_and_inference",
+                "Repository URL: https://github.com/anukalp-mishra/Resume-Screening",
+                "Description: Language model inference system for synthetic text generation.",
+                "Source files: train_gpt2.py",
+                "Detection signals: file signal: train_gpt2.py matched *train*.py; dependency signal: train_gpt2.py imports torch",
+            ]
+        )
+    )
+
+    assert response.risk_class == "LIMITED_RISK"
+    assert response.primary_article == "Article 50(2)"
+    assert response.deadline_iso is not None
+    assert response.deadline_iso.isoformat() == "2026-12-02"
+
+
 @pytest.mark.asyncio
 async def test_classifier_agent_updates_ai_system_and_persists_agent_run(
     monkeypatch: pytest.MonkeyPatch,

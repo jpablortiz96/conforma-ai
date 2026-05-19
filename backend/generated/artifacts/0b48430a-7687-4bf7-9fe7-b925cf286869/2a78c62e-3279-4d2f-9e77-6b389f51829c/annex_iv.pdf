@@ -1,0 +1,366 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 3353 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(Annex IV Technical Documentation) Tj
+T*
+(resume_screening_model) Tj
+T*
+() Tj
+T*
+(Audit ID: 0b48430a-7687-4bf7-9fe7-b925cf286869) Tj
+T*
+(AI System ID: 2a78c62e-3279-4d2f-9e77-6b389f51829c) Tj
+T*
+(Risk class: HIGH_RISK) Tj
+T*
+(Primary article: Annex III Section 4\(a\)) Tj
+T*
+(Deadline: 2 December 2027) Tj
+T*
+(Generated at: 2026-05-19T02:42:49.365142+00:00) Tj
+T*
+() Tj
+T*
+(Section 1 - General Description) Tj
+T*
+(resume_screening_model is treated as a high-risk AI system under Annex III Section 4\(a\).) Tj
+T*
+(Based on the repository evidence, the system appears to A machine learning system designed) Tj
+T*
+(to automate resume screening for recruitment by evaluating applicant resumes, candidate) Tj
+T*
+(suitability, and hiring-related evidence before human reviewers make employment decisions.) Tj
+T*
+(The documentation input references README.md, Resume_Screening.ipynb, and the evidence trail) Tj
+T*
+(highlights repository signal: repository name contains Resume-Screening, README signal:) Tj
+T*
+(README.md readme mentions machine learning, domain signal: Resume_Screening.ipynb suggests) Tj
+T*
+(resume or CV workflows, domain signal: Resume_Screening.ipynb suggests screening workflows,) Tj
+T*
+(file signal: Resume_Screening.ipynb suggests resume screening workflow. The source) Tj
+T*
+(repository recorded for this package is https://github.com/anukalp-mishra/Resume-Screening.) Tj
+T*
+(Provider identity, released version, hardware dependencies, software bill of materials, and) Tj
+T*
+(market form are not fully documented. [GAP - information not available in repository.) Tj
+T*
+(Provider must document.]) Tj
+T*
+() Tj
+T*
+(Section 2 - Intended Purpose) Tj
+T*
+(The intended purpose inferred from the repository is to support the following use case: A) Tj
+T*
+(machine learning system designed to automate resume screening for recruitment by evaluating) Tj
+T*
+(applicant resumes, candidate suitability, and hiring-related evidence before human reviewers) Tj
+T*
+(make employment decisions. The likely intended users are provider-side operators, recruiting) Tj
+T*
+(or decision-support staff, and technical maintainers who integrate the model into a) Tj
+T*
+(production workflow. Affected natural persons are the individuals whose data, applications,) Tj
+T*
+(or profiles are evaluated by the system. Foreseeable misuse includes over-reliance on) Tj
+T*
+(automated ranking, insufficient contestability, and reuse of outputs outside the intended) Tj
+T*
+(workflow. The repository does not formally document user classes, affected groups, or misuse) Tj
+T*
+(boundaries. [GAP - information not available in repository. Provider must document.]) Tj
+T*
+() Tj
+T*
+(Section 3 - Human Oversight Measures) Tj
+T*
+(The repository evidence does not expose a formal human-oversight procedure, but a compliant) Tj
+T*
+(provider would need to ensure trained reviewers can understand model outputs, challenge) Tj
+T*
+(unexpected recommendations, and halt deployment when performance or fairness concerns arise.) Tj
+T*
+(Operators should be able to inspect the evidence trail, review ranked outputs alongside) Tj
+T*
+(underlying inputs, and escalate uncertain cases for manual adjudication. Thresholds for) Tj
+T*
+(human intervention, override authority, and reviewer training requirements are not) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 1) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 3543 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(documented in the repository. [GAP - information not available in repository. Provider must) Tj
+T*
+(document.]) Tj
+T*
+() Tj
+T*
+(Section 4 - Input Data Specifications) Tj
+T*
+(Input evidence provided to the agent includes Referenced source file: README.md, Referenced) Tj
+T*
+(source file: Resume_Screening.ipynb, Evidence trail: repository signal: repository name) Tj
+T*
+(contains Resume-Screening. This suggests that the system relies on structured or) Tj
+T*
+(semi-structured inputs derived from repository-defined features, but the repository does not) Tj
+T*
+(provide a dataset card, provenance log, labeling methodology, retention policy, or) Tj
+T*
+(validation-data register. Training, validation, and test datasets therefore cannot be) Tj
+T*
+(characterized with confidence from the available materials. A provider should document data) Tj
+T*
+(sources, collection logic, preprocessing, cleaning, annotation, representativeness checks,) Tj
+T*
+(and known quality limitations. [GAP - information not available in repository. Provider must) Tj
+T*
+(document.]) Tj
+T*
+() Tj
+T*
+(Section 5 - Design Specifications) Tj
+T*
+(The available evidence points to implementation components located in README.md,) Tj
+T*
+(Resume_Screening.ipynb. The system likely follows an application architecture in which model) Tj
+T*
+(or scoring logic is embedded inside a broader software workflow, with operational context) Tj
+T*
+(inferred from repository signal: repository name contains Resume-Screening, README signal:) Tj
+T*
+(README.md readme mentions machine learning, domain signal: Resume_Screening.ipynb suggests) Tj
+T*
+(resume or CV workflows, domain signal: Resume_Screening.ipynb suggests screening workflows,) Tj
+T*
+(file signal: Resume_Screening.ipynb suggests resume screening workflow. The repository does) Tj
+T*
+(not contain a formal architecture decision record, model-card rationale,) Tj
+T*
+(significant-modification register, or harmonised standards mapping. As a result, the design) Tj
+T*
+(description remains provisional and should be completed by the provider before placing the) Tj
+T*
+(system on the market or putting it into service. [GAP - information not available in) Tj
+T*
+(repository. Provider must document.]) Tj
+T*
+() Tj
+T*
+(Section 6 - Risk Management System) Tj
+T*
+(A high-risk provider must operate a documented Article 9 risk-management system that) Tj
+T*
+(identifies reasonably foreseeable harms, evaluates severity and likelihood, and tracks) Tj
+T*
+(mitigation measures through the full lifecycle. From the repository alone, no formal risk) Tj
+T*
+(register, hazard taxonomy, residual-risk acceptance criteria, or control-owner mapping is) Tj
+T*
+(visible. The provider should explicitly document risks related to erroneous outputs, unfair) Tj
+T*
+(outcomes, data-quality failures, security abuse, logging gaps, and downstream over-reliance.) Tj
+T*
+([GAP - information not available in repository. Provider must document.]) Tj
+T*
+() Tj
+T*
+(Section 7 - Validation and Testing) Tj
+T*
+(Validation and testing evidence is not explicitly documented in the repository materials) Tj
+T*
+(supplied to this agent. A compliant Annex IV package should identify test methodology,) Tj
+T*
+(validation datasets, hold-out logic, acceptance thresholds, regression test coverage,) Tj
+T*
+(discriminatory-bias evaluation, and issue-tracking for failed cases. The repository also) Tj
+T*
+(does not expose traceable benchmark outputs or sign-off criteria for release readiness.) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 2) Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 3011 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(Testing expectations therefore remain incomplete and require provider-authored) Tj
+T*
+(substantiation. [GAP - information not available in repository. Provider must document.]) Tj
+T*
+() Tj
+T*
+(Section 8 - Performance Metrics) Tj
+T*
+(Performance metrics should document accuracy, robustness, resilience to misuse, and) Tj
+T*
+(cybersecurity considerations relevant to the system's intended purpose. No auditable metric) Tj
+T*
+(pack was provided in the repository inputs, so metrics such as precision, recall,) Tj
+T*
+(calibration, false-positive rates, drift tolerance, latency budgets, robustness tests, or) Tj
+T*
+(adversarial-security assumptions cannot be confirmed. Trade-offs between operational) Tj
+T*
+(efficiency, safety, fairness, and explainability are likewise not documented. [GAP -) Tj
+T*
+(information not available in repository. Provider must document.]) Tj
+T*
+() Tj
+T*
+(Section 9 - Post-Market Monitoring) Tj
+T*
+(High-risk providers are expected to maintain post-market monitoring, incident intake,) Tj
+T*
+(corrective-action triggers, and periodic risk reassessment. The repository does not contain) Tj
+T*
+(a monitoring plan, field-performance feedback loop, logging-retention schedule, or) Tj
+T*
+(serious-incident reporting workflow. Before deployment, the provider should define who) Tj
+T*
+(monitors operational performance, how incidents are triaged, how model changes are approved,) Tj
+T*
+(and when the Annex IV package is re-issued. [GAP - information not available in repository.) Tj
+T*
+(Provider must document.]) Tj
+T*
+() Tj
+T*
+(Appendix A - Gaps Identified) Tj
+T*
+(- Provider identity, versioning, hardware dependencies, and market form are not fully) Tj
+T*
+(evidenced in the repository.) Tj
+T*
+(- Affected natural-person categories, intended users, and foreseeable misuse are not fully) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Human oversight procedures, escalation paths, and output interpretation guidance are not) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Dataset provenance, labeling, cleaning, validation data, and data-quality controls are not) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Formal architecture rationale, lifecycle change controls, and standards mapping are not) Tj
+T*
+(fully documented in the repository.) Tj
+T*
+(- The Article 9 risk-management process and provider-owned control register are not) Tj
+T*
+(documented in the repository.) Tj
+T*
+(- Validation datasets, bias testing evidence, and documented test results are not present in) Tj
+T*
+(the repository.) Tj
+T*
+(- Accuracy, robustness, cybersecurity, and trade-off metrics are not evidenced in the) Tj
+T*
+(repository.) Tj
+T*
+(- Post-market monitoring, serious-incident reporting, and risk reassessment procedures are) Tj
+T*
+(not documented in the repository.) Tj
+T*
+() Tj
+T*
+(Appendix B - References) Tj
+T*
+(- Regulation EU 2024/1689) Tj
+T*
+(- Source repository: https://github.com/anukalp-mishra/Resume-Screening) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 3) Tj
+ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 286 >>
+stream
+BT
+/F1 11 Tf
+72 760 Td
+14 TL
+(- Audit ID: 0b48430a-7687-4bf7-9fe7-b925cf286869) Tj
+T*
+(- AI System ID: 2a78c62e-3279-4d2f-9e77-6b389f51829c) Tj
+T*
+(- Generated at: 2026-05-19T02:42:49.365142+00:00) Tj
+T*
+(- Deadline: 2 December 2027) Tj
+T*
+(Regulation EU 2024/1689) Tj
+T*
+(Page 4) Tj
+ET
+endstream
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000140 00000 n 
+0000000210 00000 n 
+0000000336 00000 n 
+0000003741 00000 n 
+0000003867 00000 n 
+0000007462 00000 n 
+0000007588 00000 n 
+0000010651 00000 n 
+0000010779 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R >>
+startxref
+11117
+%%EOF

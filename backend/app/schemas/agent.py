@@ -14,6 +14,13 @@ from app.schemas.artifact import ArtifactSummary
 RiskClass = Literal["UNACCEPTABLE", "HIGH_RISK", "LIMITED_RISK", "MINIMAL_RISK"]
 ResponseMode = Literal["gemini", "fallback"]
 GapSeverity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+MonitorAlertSeverity = Literal["CRITICAL", "WARNING", "INFO"]
+MonitorAlertType = Literal[
+    "DEADLINE_APPROACH",
+    "REGULATORY_UPDATE",
+    "DRIFT_SIMULATION",
+    "MISSING_CONTROL",
+]
 
 ISO_DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 NULLISH_DEADLINE_VALUES = {
@@ -28,14 +35,42 @@ NULLISH_DEADLINE_VALUES = {
 
 
 def sanitize_reference_text(value: str) -> str:
-    """Normalize problematic section symbols into ASCII-safe wording."""
+    """Normalize common mojibake and section symbols into stable display text."""
 
-    return (
-        value.replace("ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§", "Section ")
-        .replace("Ãƒâ€šÃ‚Â§", "Section ")
-        .replace("Ã‚Â§", "Section ")
-        .replace("Â§", "Section ")
+    replacements = (
+        ("Ãƒâ€šÃ‚Â§", "Section "),
+        ("Ã‚Â§", "Section "),
+        ("Â§", "Section "),
+        ("§", "Section "),
+        ("Ã¢â€šÂ¬", "€"),
+        ("â‚¬", "€"),
+        ("ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬", "€"),
+        ("â€™", "'"),
+        ("Ã¢â‚¬â„¢", "'"),
+        ("â€œ", '"'),
+        ("â€", '"'),
+        ("â€“", "-"),
+        ("Ã¢â‚¬â€œ", "-"),
+        ("â€”", "-"),
+        ("Ã¢â‚¬â€", "-"),
     )
+    normalized = value
+    for source, target in replacements:
+        normalized = normalized.replace(source, target)
+    return normalized
+
+
+def normalize_multiline_text(value: str) -> str:
+    """Normalize text while preserving meaningful line boundaries."""
+
+    normalized_lines = [
+        " ".join(line.strip().split())
+        for line in value.strip().splitlines()
+        if line.strip()
+    ]
+    if normalized_lines:
+        return "\n".join(normalized_lines)
+    return " ".join(value.strip().split())
 
 
 def normalize_deadline_iso_value(value: Any) -> date | None:
@@ -103,7 +138,7 @@ class ClassifierRequest(BaseModel):
     def normalize_description(cls, value: str) -> str:
         """Strip and validate the incoming description."""
 
-        text = value.strip()
+        text = normalize_multiline_text(value)
         if len(text) < 4:
             raise ValueError("system_description must contain at least 4 characters.")
         return text
@@ -122,7 +157,7 @@ class ClassifierInput(BaseModel):
     def normalize_internal_description(cls, value: str) -> str:
         """Normalize internal descriptions before classification."""
 
-        return " ".join(value.strip().split())
+        return normalize_multiline_text(value)
 
 
 class ClassifierResponse(BaseModel):
@@ -252,6 +287,17 @@ class ScannerOutput(BaseModel):
     mode: ResponseMode
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_scanner_output(cls, value: Any) -> Any:
+        """Normalize summary text coming from scanner fallbacks or Gemini."""
+
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        payload["summary"] = sanitize_reference_text(str(payload.get("summary", "")).strip())
+        return payload
 
 
 class DocumentationRequest(BaseModel):
@@ -499,6 +545,83 @@ class GapAuditorResponse(BaseModel):
     gaps: list[GapAuditorGap] = Field(default_factory=list)
     summary: str
     priority_actions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_gap_auditor_payload(cls, value: Any) -> Any:
+        """Sanitize summary and priority actions from model or fallback output."""
+
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        payload["summary"] = sanitize_reference_text(str(payload.get("summary", "")).strip())
+        payload["priority_actions"] = [
+            sanitize_reference_text(" ".join(str(item).strip().split()))
+            for item in list(payload.get("priority_actions", []) or [])
+            if str(item).strip()
+        ]
+        return payload
+
+
+class MonitorRequest(BaseModel):
+    """Public request payload for the Monitor Agent."""
+
+    audit_id: UUID
+    systems: list[dict[str, Any]] = Field(default_factory=list)
+    gaps: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MonitorInput(MonitorRequest):
+    """Validated internal Monitor Agent input."""
+
+
+class MonitorAlert(BaseModel):
+    """One operational monitoring alert emitted after an audit."""
+
+    severity: MonitorAlertSeverity
+    type: MonitorAlertType
+    title: str = Field(..., min_length=3, max_length=255)
+    description: str = Field(..., min_length=8, max_length=4000)
+    affected_system_id: UUID | None = None
+    recommended_action: str = Field(..., min_length=8, max_length=2000)
+    deadline_iso: date | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_monitor_alert(cls, value: Any) -> Any:
+        """Sanitize monitor alert fields and coerce flexible deadline payloads."""
+
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        for field_name in ("title", "description", "recommended_action"):
+            payload[field_name] = sanitize_reference_text(
+                " ".join(str(payload.get(field_name, "")).strip().split())
+            )
+        payload["deadline_iso"] = normalize_deadline_iso_value(payload.get("deadline_iso"))
+        return payload
+
+
+class MonitorResponse(BaseModel):
+    """Public response returned by the Monitor Agent."""
+
+    audit_id: UUID
+    alerts: list[MonitorAlert] = Field(default_factory=list)
+    next_check_at: datetime
+    summary: str
+    mode: ResponseMode | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_monitor_response(cls, value: Any) -> Any:
+        """Sanitize monitor summary text."""
+
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        payload["summary"] = sanitize_reference_text(str(payload.get("summary", "")).strip())
+        return payload
 
 
 class DemoHighRiskSystemResponse(BaseModel):

@@ -121,6 +121,9 @@ def test_compliance_pack_for_resume_screening_uses_existing_annex_iv_and_returns
     assert payload["article_50_count"] == 0
     assert payload["disclosures"] == []
     assert payload["gaps"]
+    assert not any(
+        gap["title"] == "Annex IV technical documentation is missing" for gap in payload["gaps"]
+    )
     assert len(fake_db.records["gaps"]) == len(payload["gaps"])
     assert len(fake_db.records["agent_runs"]) == 1
 
