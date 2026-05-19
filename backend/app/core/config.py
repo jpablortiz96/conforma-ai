@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+import re
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     frontend_url: str = Field(default="http://localhost:3000", alias="FRONTEND_URL")
     allowed_origins: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
-        alias="ALLOWED_ORIGINS",
+        validation_alias=AliasChoices("ALLOWED_ORIGINS", "CORS_ORIGINS"),
     )
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
     gemini_pro_model: str = Field(
@@ -57,6 +58,20 @@ class Settings(BaseSettings):
 
         items = [origin.strip() for origin in self.allowed_origins.split(",")]
         return [origin for origin in items if origin]
+
+    @property
+    def cors_origin_regex(self) -> str | None:
+        """Return a regex for wildcard origins such as Vercel preview URLs."""
+
+        wildcard_origins = [origin for origin in self.cors_origins if "*" in origin]
+        if not wildcard_origins:
+            return None
+
+        patterns = [
+            "^" + re.escape(origin).replace("\\*", "[^/]+") + "$"
+            for origin in wildcard_origins
+        ]
+        return "|".join(patterns)
 
 
 @lru_cache(maxsize=1)

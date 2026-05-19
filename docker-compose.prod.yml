@@ -1,0 +1,61 @@
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: conforma-api
+    restart: unless-stopped
+    env_file:
+      - path: ./backend/.env.production
+        required: false
+    environment:
+      APP_ENV: production
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3); sys.exit(0 if response.status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: conforma-redis-prod
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data_prod:/data
+
+  # Optional local fallback for D6 dry runs when you do not use Managed PostgreSQL.
+  postgres:
+    profiles: ["fallback-db"]
+    image: postgres:16
+    container_name: conforma-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: conforma_ai
+      POSTGRES_USER: conforma
+      POSTGRES_PASSWORD: change-me-in-backend-env-production
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conforma -d conforma_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+
+volumes:
+  redis_data_prod:
+  postgres_data_prod:
